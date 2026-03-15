@@ -6,7 +6,7 @@ import pytest
 from telegram import Update
 from telegram.error import TelegramError
 
-from agent.telegram_bot import (
+from agent.telegram.bot import (
     _send_long_message,
     _split_and_send,
     create_application,
@@ -123,7 +123,7 @@ class TestResetCommand:
     ) -> None:
         """Test that session is reset and confirmation sent."""
         with patch(
-            "agent.telegram_bot.reset_session",
+            "agent.telegram.bot.reset_session",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_reset:
@@ -140,7 +140,7 @@ class TestResetCommand:
     ) -> None:
         """Test that error message is shown when reset fails."""
         with patch(
-            "agent.telegram_bot.reset_session",
+            "agent.telegram.bot.reset_session",
             new_callable=AsyncMock,
             return_value=False,
         ) as mock_reset:
@@ -159,7 +159,7 @@ class TestResetCommand:
         update.effective_user = MagicMock()
 
         with patch(
-            "agent.telegram_bot.reset_session", new_callable=AsyncMock
+            "agent.telegram.bot.reset_session", new_callable=AsyncMock
         ) as mock_reset:
             await reset_command(update, mock_context)
 
@@ -173,7 +173,7 @@ class TestResetCommand:
         update.effective_user = None
 
         with patch(
-            "agent.telegram_bot.reset_session", new_callable=AsyncMock
+            "agent.telegram.bot.reset_session", new_callable=AsyncMock
         ) as mock_reset:
             await reset_command(update, mock_context)
 
@@ -190,7 +190,7 @@ class TestHandleMessage:
     ) -> None:
         """Test that message is processed and response is sent."""
         with patch(
-            "agent.telegram_bot.process_message",
+            "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
             return_value="Hello! How can I help?",
         ):
@@ -206,7 +206,7 @@ class TestHandleMessage:
     ) -> None:
         """Test that typing indicator is sent while processing."""
         with patch(
-            "agent.telegram_bot.process_message",
+            "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
             return_value="Response",
         ):
@@ -270,7 +270,7 @@ class TestHandleMessage:
     ) -> None:
         """Test that TelegramError exceptions are handled separately."""
         with patch(
-            "agent.telegram_bot.process_message",
+            "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
             side_effect=TelegramError("API Error"),
         ):
@@ -286,7 +286,7 @@ class TestHandleMessage:
     ) -> None:
         """Test that general exceptions are handled and error message sent."""
         with patch(
-            "agent.telegram_bot.process_message",
+            "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
             side_effect=Exception("Internal Error"),
         ):
@@ -304,7 +304,7 @@ class TestHandleMessage:
         long_response = "A" * 5000
 
         with patch(
-            "agent.telegram_bot.process_message",
+            "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
             return_value=long_response,
         ):
@@ -321,7 +321,7 @@ class TestHandleMessage:
         short_response = "Short response"
 
         with patch(
-            "agent.telegram_bot.process_message",
+            "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
             return_value=short_response,
         ):
@@ -528,7 +528,7 @@ class TestCreateApplication:
 
     def test_creates_application_with_token(self) -> None:
         """Test that application is created with the provided token."""
-        with patch("agent.telegram_bot.initialize_runner") as mock_init:
+        with patch("agent.telegram.bot.initialize_runner") as mock_init:
             app = create_application("test-token-123")
 
             assert app is not None
@@ -536,7 +536,7 @@ class TestCreateApplication:
 
     def test_registers_command_handlers(self) -> None:
         """Test that command handlers are registered."""
-        with patch("agent.telegram_bot.initialize_runner"):
+        with patch("agent.telegram.bot.initialize_runner"):
             app = create_application("test-token-123")
 
             # Check that handlers are registered (stored in group 0 by default)
@@ -547,8 +547,8 @@ class TestCreateApplication:
     def test_uses_root_agent(self) -> None:
         """Test that root_agent is used for initialization."""
         with (
-            patch("agent.telegram_bot.initialize_runner") as mock_init,
-            patch("agent.telegram_bot.root_agent") as mock_agent,
+            patch("agent.telegram.bot.initialize_runner") as mock_init,
+            patch("agent.telegram.bot.root_agent") as mock_agent,
         ):
             create_application("test-token-123")
 
@@ -569,7 +569,7 @@ class TestSetBotCommands:
         mock_app = MagicMock()
         mock_app.bot = mock_bot
 
-        from agent.telegram_bot import _set_bot_commands
+        from agent.telegram.bot import _set_bot_commands
 
         await _set_bot_commands(mock_app)
 
@@ -587,7 +587,7 @@ class TestRunBot:
 
     def test_returns_1_when_token_not_set(self) -> None:
         """Test that run_bot returns 1 when token is None."""
-        import agent.telegram_bot as bot_module
+        import agent.telegram.bot as bot_module
 
         with patch.object(bot_module.logger, "error") as mock_logger:
             result = bot_module.run_bot(None)
@@ -602,7 +602,7 @@ class TestRunBot:
         mock_app = MagicMock()
         mock_app.run_polling = MagicMock()
 
-        import agent.telegram_bot as bot_module
+        import agent.telegram.bot as bot_module
 
         with patch.object(bot_module, "create_application", return_value=mock_app):
             result = bot_module.run_bot("test-token")
@@ -616,7 +616,7 @@ class TestMain:
 
     def test_exits_when_token_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that main exits with code 1 when TELEGRAM_BOT_TOKEN is not set."""
-        import agent.telegram_bot as bot_module
+        import agent.telegram.bot as bot_module
 
         monkeypatch.setattr(bot_module, "TELEGRAM_BOT_TOKEN", None)
 
@@ -630,7 +630,7 @@ class TestMain:
         mock_app = MagicMock()
         mock_app.run_polling = MagicMock()
 
-        import agent.telegram_bot as bot_module
+        import agent.telegram.bot as bot_module
 
         with (
             patch.object(bot_module, "TELEGRAM_BOT_TOKEN", "test-token"),

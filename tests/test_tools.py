@@ -11,8 +11,7 @@ import pytest
 # Import mock classes from conftest
 from conftest import MockState, MockToolContext
 
-from agent.reminder_scheduler import ReminderScheduler
-from agent.reminder_storage import ReminderStorage
+from agent.reminders import ReminderScheduler, ReminderStorage
 from agent.tools import (
     _parse_reminder_datetime,
     cancel_reminder,

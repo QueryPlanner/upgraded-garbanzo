@@ -7,7 +7,7 @@ from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from agent.telegram_handler import (
+from agent.telegram.handler import (
     TelegramHandler,
     initialize_runner,
     process_message,
@@ -327,7 +327,7 @@ class TestTelegramHandler:
                 new_callable=AsyncMock,
                 side_effect=Exception("Create failed"),
             ),
-            patch("agent.telegram_handler.logger") as mock_logger,
+            patch("agent.telegram.handler.logger") as mock_logger,
         ):
             result = await handler.reset_session("user-1")
 
@@ -353,7 +353,7 @@ class TestTelegramHandler:
                 "create_session",
                 new_callable=AsyncMock,
             ) as mock_create,
-            patch("agent.telegram_handler.logger") as mock_logger,
+            patch("agent.telegram.handler.logger") as mock_logger,
         ):
             result = await handler.reset_session("user-1")
 
@@ -387,9 +387,9 @@ class TestProcessMessageFunction:
     async def test_raises_error_when_handler_not_initialized(self) -> None:
         """Test that RuntimeError is raised when handler not initialized."""
         # Reset the global handler
-        from agent import telegram_handler
+        from agent.telegram import handler
 
-        telegram_handler._handler = None
+        handler._handler = None
 
         with pytest.raises(RuntimeError, match="Handler not initialized"):
             await process_message("user-1", "Hello")
@@ -405,12 +405,10 @@ class TestProcessMessageFunction:
             )
 
         # Get the handler created by initialize_runner
-        from agent import telegram_handler
+        from agent.telegram import handler
 
-        assert telegram_handler._handler is not None
-        with patch.object(
-            telegram_handler._handler.runner, "run_async", mock_run_async
-        ):
+        assert handler._handler is not None
+        with patch.object(handler._handler.runner, "run_async", mock_run_async):
             response = await process_message("user-1", "Hello")
 
         assert response == "Response"
@@ -422,9 +420,9 @@ class TestResetSessionFunction:
     @pytest.mark.asyncio
     async def test_returns_false_when_handler_not_initialized(self) -> None:
         """Test that False is returned when handler not initialized."""
-        from agent import telegram_handler
+        from agent.telegram import handler
 
-        telegram_handler._handler = None
+        handler._handler = None
 
         result = await reset_session("user-1")
 
@@ -436,7 +434,7 @@ class TestResetSessionFunction:
         initialize_runner(mock_agent, app_name="test-app")
 
         with patch(
-            "agent.telegram_handler.TelegramHandler.reset_session",
+            "agent.telegram.handler.TelegramHandler.reset_session",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_handler_reset:

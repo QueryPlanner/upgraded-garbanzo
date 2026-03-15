@@ -6,8 +6,7 @@ from typing import Any
 
 from google.adk.tools import ToolContext
 
-from .reminder_scheduler import get_scheduler
-from .reminder_storage import Reminder
+from .reminders import Reminder, get_scheduler
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ Setup Instructions:
 
 Usage:
     - Send any message to interact with the agent
-    - Use /clear to start a new conversation
+    - Use /reset to start a new conversation
     - Use /help to see available commands
 """
 
@@ -34,9 +34,9 @@ from telegram.ext import (
 # Load environment variables from .env file
 load_dotenv()
 
-from .agent import root_agent  # noqa: E402
-from .reminder_scheduler import get_scheduler  # noqa: E402
-from .telegram_handler import (  # noqa: E402
+from ..agent import root_agent  # noqa: E402
+from ..reminders import get_scheduler  # noqa: E402
+from .handler import (  # noqa: E402
     initialize_runner,
     process_message,
     reset_session,

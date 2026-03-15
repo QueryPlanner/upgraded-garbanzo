@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
 
-from .reminder_storage import Reminder, get_storage
+from .storage import Reminder, get_storage
 
 if TYPE_CHECKING:
     from telegram import Bot

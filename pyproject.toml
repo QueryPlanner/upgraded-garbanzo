@@ -31,7 +31,7 @@ dependencies = [
 
 [project.scripts]
 server = "agent.server:main"
-telegram-bot = "agent.telegram_bot:main"
+telegram-bot = "agent.telegram.bot:main"
 
 [dependency-groups]
 dev = [

@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent.reminder_scheduler import ReminderScheduler
-from agent.reminder_storage import ReminderStorage
+from agent.reminders.scheduler import ReminderScheduler
+from agent.reminders.storage import ReminderStorage
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.reminder_storage import Reminder, ReminderStorage
+from agent.reminders.storage import Reminder, ReminderStorage
 
 
 @pytest.fixture
