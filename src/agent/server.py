@@ -53,11 +53,13 @@ session_db_kwargs = {
 }
 
 # ADK fastapi app will set up OTel using resource attributes from env vars
+# artifact_service_uri=None enables local artifact storage in .adk/artifacts
+# for SOUL.md and other evolving context
 app: FastAPI = get_fast_api_app(
     agents_dir=AGENT_DIR,
     session_service_uri=session_uri,
     session_db_kwargs=session_db_kwargs,
-    artifact_service_uri=None,  # Explicitly None as GCP bucket not used
+    artifact_service_uri=None,
     # Memory service does not yet support Postgres scheme in ADK
     memory_service_uri=None,
     allow_origins=env.allow_origins_list,

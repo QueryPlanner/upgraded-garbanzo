@@ -1,5 +1,6 @@
 """Unit tests for prompt definition functions."""
 
+import re
 from datetime import date
 
 from conftest import MockReadonlyContext
@@ -106,8 +107,6 @@ class TestReturnGlobalInstruction:
         instruction1 = return_global_instruction(mock_readonly_context)  # type: ignore
 
         # Verify it contains a datetime-like pattern (YYYY-MM-DD HH:MM:SS)
-        import re
-
         datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
         assert re.search(datetime_pattern, instruction1)
 
@@ -155,9 +154,7 @@ class TestReturnGlobalInstruction:
         instruction1 = return_global_instruction(context1)  # type: ignore
         instruction2 = return_global_instruction(context2)  # type: ignore
 
-        # Both should contain the IST datetime pattern
-        import re
-
+        # Both should contain the datetime pattern
         datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
         assert re.search(datetime_pattern, instruction1)
         assert re.search(datetime_pattern, instruction2)
@@ -176,7 +173,27 @@ class TestReturnGlobalInstruction:
         assert "\n" in instruction1  # Multi-line format
         assert "Current time" in instruction1
         # Verify datetime format (YYYY-MM-DD HH:MM:SS Day)
-        import re
-
         datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
         assert re.search(datetime_pattern, instruction1)
+
+    def test_includes_context_files(
+        self, mock_readonly_context: MockReadonlyContext
+    ) -> None:
+        """Test that instruction includes all context files."""
+        instruction = return_global_instruction(mock_readonly_context)  # type: ignore
+
+        # Should contain SOUL.md
+        assert "SOUL.md" in instruction
+        assert "Core Truths" in instruction
+        assert "Boundaries" in instruction
+        assert "Continuity" in instruction
+
+        # Should contain IDENTITY.md
+        assert "IDENTITY.md" in instruction
+        assert "Name" in instruction
+        assert "Creature" in instruction
+        assert "Vibe" in instruction
+
+        # Should contain USER.md
+        assert "USER.md" in instruction
+        assert "Context" in instruction

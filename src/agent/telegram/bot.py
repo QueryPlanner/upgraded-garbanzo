@@ -35,7 +35,7 @@ from telegram.ext import (
 # Load environment variables from .env file
 load_dotenv()
 
-from ..agent import root_agent  # noqa: E402
+from ..agent import app  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
 from .handler import (  # noqa: E402
     initialize_runner,
@@ -278,8 +278,10 @@ def create_application(token: str) -> Application:
     Returns:
         Configured Application instance with handlers registered.
     """
-    # Initialize the ADK runner with the root agent
-    initialize_runner(agent=root_agent, app_name="telegram-adk-bot")
+    # Initialize the ADK runner with the app (includes plugins)
+    # This ensures SOUL.md, IDENTITY.md, and USER.md are loaded
+    initialize_runner(app=app)
+    logger.info("ADK Runner initialized with app and plugins")
 
     # Create the Telegram Application
     application = (

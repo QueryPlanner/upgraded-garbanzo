@@ -20,6 +20,7 @@ from google.adk.plugins.logging_plugin import LoggingPlugin  # noqa: E402
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool  # noqa: E402
 
 from .callbacks import LoggingCallbacks, add_session_to_memory  # noqa: E402
+from .context import update_identity, update_soul, update_user  # noqa: E402
 from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
@@ -77,6 +78,10 @@ root_agent = LlmAgent(
         schedule_reminder,
         list_reminders,
         cancel_reminder,
+        # Context files - allow agent to evolve its personality and remember the user
+        update_soul,
+        update_identity,
+        update_user,
     ],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,

@@ -544,17 +544,15 @@ class TestCreateApplication:
             # start, help, reset, reminders, message handler
             assert len(handlers) == 5
 
-    def test_uses_root_agent(self) -> None:
-        """Test that root_agent is used for initialization."""
+    def test_uses_app_for_initialization(self) -> None:
+        """Test that app is used for initialization (includes plugins)."""
         with (
             patch("agent.telegram.bot.initialize_runner") as mock_init,
-            patch("agent.telegram.bot.root_agent") as mock_agent,
+            patch("agent.telegram.bot.app") as mock_app,
         ):
             create_application("test-token-123")
 
-            mock_init.assert_called_once_with(
-                agent=mock_agent, app_name="telegram-adk-bot"
-            )
+            mock_init.assert_called_once_with(app=mock_app)
 
 
 class TestSetBotCommands:

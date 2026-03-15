@@ -62,9 +62,16 @@ class MockSession:
     Minimal mock used by MockReadonlyContext.
     """
 
-    def __init__(self, user_id: str = "test_user_123") -> None:
+    def __init__(
+        self,
+        user_id: str = "test_user_123",
+        app_name: str = "test_app",
+        id: str = "test_session_id",
+    ) -> None:
         """Initialize mock session with user_id."""
         self.user_id = user_id
+        self.app_name = app_name
+        self.id = id
 
 
 class MockMemoryCallbackContext:

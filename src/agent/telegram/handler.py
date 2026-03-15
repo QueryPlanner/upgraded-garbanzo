@@ -7,6 +7,7 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 import logging
 
 from google.adk.agents import LlmAgent
+from google.adk.apps import App
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
@@ -25,17 +26,35 @@ class TelegramHandler:
         app_name: The application name for session management.
     """
 
-    def __init__(self, agent: LlmAgent, app_name: str = "telegram-bot") -> None:
-        """Initialize the TelegramHandler with an ADK agent.
+    def __init__(
+        self,
+        agent: LlmAgent | None = None,
+        app: App | None = None,
+        app_name: str = "telegram-bot",
+    ) -> None:
+        """Initialize the TelegramHandler with an ADK agent or app.
 
         Args:
-            agent: The LlmAgent to use for processing messages.
-            app_name: Application name for session management.
+            agent: The LlmAgent to use for processing messages (deprecated, use app).
+            app: The App instance containing the agent and plugins.
+            app_name: Application name for session management (used if agent provided).
+
+        Note:
+            Prefer passing `app` to ensure plugins (like GlobalInstructionPlugin)
+            are properly registered.
         """
-        self.agent = agent
-        self.app_name = app_name
-        self.runner = InMemoryRunner(agent=agent, app_name=app_name)
-        logger.info(f"ADK Runner initialized with app_name={app_name}")
+        if app is not None:
+            self.agent = app.root_agent
+            self.app_name = app.name
+            self.runner = InMemoryRunner(app=app)
+            logger.info(f"ADK Runner initialized with app={app.name}")
+        elif agent is not None:
+            self.agent = agent
+            self.app_name = app_name
+            self.runner = InMemoryRunner(agent=agent, app_name=app_name)
+            logger.info(f"ADK Runner initialized with agent and app_name={app_name}")
+        else:
+            raise ValueError("Either agent or app must be provided")
 
     async def process_message(
         self,
@@ -167,22 +186,25 @@ _handler: TelegramHandler | None = None
 
 
 def initialize_runner(
-    agent: LlmAgent, app_name: str = "telegram-bot"
+    agent: LlmAgent | None = None,
+    app: App | None = None,
+    app_name: str = "telegram-bot",
 ) -> InMemoryRunner:
-    """Initialize the ADK runner with the given agent.
+    """Initialize the ADK runner with the given agent or app.
 
     This function is maintained for backwards compatibility.
     Consider using the TelegramHandler class directly for new code.
 
     Args:
-        agent: The LlmAgent to use for processing messages.
-        app_name: Application name for session management.
+        agent: The LlmAgent to use for processing messages (deprecated, use app).
+        app: The App instance containing the agent and plugins.
+        app_name: Application name for session management (used if agent provided).
 
     Returns:
         Initialized InMemoryRunner instance.
     """
     global _handler
-    _handler = TelegramHandler(agent=agent, app_name=app_name)
+    _handler = TelegramHandler(agent=agent, app=app, app_name=app_name)
     return _handler.runner
 
 
