@@ -1,6 +1,7 @@
 """Prompt definitions for the LLM agent."""
 
-from datetime import datetime
+import os
+from datetime import UTC, datetime, tzinfo
 from zoneinfo import ZoneInfo
 
 from google.adk.agents.readonly_context import ReadonlyContext
@@ -30,21 +31,37 @@ def return_instruction_root() -> str:
 
 
 def return_global_instruction(ctx: ReadonlyContext) -> str:
-    """Generate global instruction with current IST date and time.
+    """Generate global instruction with current date and time.
 
     Uses InstructionProvider pattern to ensure date/time updates at request time.
     GlobalInstructionPlugin expects signature: (ReadonlyContext) -> str
+
+    The timezone is configurable via the TZ environment variable (defaults to UTC).
 
     Args:
         ctx: ReadonlyContext required by GlobalInstructionPlugin signature.
              Provides access to session state and metadata for future customization.
 
     Returns:
-        str: Global instruction string with dynamically generated current IST datetime.
+        str: Global instruction string with dynamically generated current datetime.
     """
     # ctx parameter required by GlobalInstructionPlugin interface
     # Currently unused but available for session-aware customization
-    ist = ZoneInfo("Asia/Kolkata")
-    now_ist = datetime.now(ist)
-    formatted_datetime = now_ist.strftime("%Y-%m-%d %H:%M:%S %A")
-    return f"\n\nYou are a helpful Assistant.\nCurrent IST: {formatted_datetime}"
+
+    # Get timezone from environment variable, default to UTC
+    tz_name = os.getenv("TZ", "UTC")
+
+    # Get the timezone object
+    tz: tzinfo
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        # Fallback to UTC if timezone is invalid
+        tz = UTC
+
+    now_tz = datetime.now(tz)
+    formatted_datetime = now_tz.strftime("%Y-%m-%d %H:%M:%S %A")
+    return (
+        f"\n\nYou are a helpful Assistant.\n"
+        f"Current time ({tz_name}): {formatted_datetime}"
+    )

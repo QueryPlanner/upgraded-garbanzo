@@ -85,7 +85,8 @@ class TestReturnGlobalInstruction:
         today = str(date.today())
 
         assert today in instruction
-        assert "ist" in instruction.lower()
+        # Should include timezone info (defaults to UTC when TZ env var not set)
+        assert "current time" in instruction.lower()
 
     def test_includes_assistant_context(
         self, mock_readonly_context: MockReadonlyContext
@@ -173,8 +174,8 @@ class TestReturnGlobalInstruction:
 
         # Should contain expected structure
         assert "\n" in instruction1  # Multi-line format
-        assert "Current IST:" in instruction1
-        # Verify IST timezone datetime format (YYYY-MM-DD HH:MM:SS Day)
+        assert "Current time" in instruction1
+        # Verify datetime format (YYYY-MM-DD HH:MM:SS Day)
         import re
 
         datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"

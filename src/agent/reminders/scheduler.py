@@ -5,7 +5,7 @@ and send them to users via Telegram push messages.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
@@ -41,7 +41,7 @@ class ReminderScheduler:
             bot: Optional Telegram Bot instance. Can be set later via set_bot().
         """
         self._bot: Bot | None = bot
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = AsyncIOScheduler(timezone="UTC")
         self.storage = get_storage()
         self._running = False
 
@@ -171,7 +171,7 @@ class ReminderScheduler:
             user_id=user_id,
             message=message,
             trigger_time=trigger_time.isoformat(),
-            created_at=datetime.now().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
 
         reminder_id = await self.storage.add_reminder(reminder)

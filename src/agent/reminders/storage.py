@@ -8,7 +8,7 @@ push notifications.
 import asyncio
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -84,7 +84,7 @@ class ReminderStorage:
                 return
 
             self._ensure_db_dir()
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._create_tables)
             self._initialized = True
             logger.info(f"Reminder storage initialized at {self.db_path}")
@@ -128,7 +128,7 @@ class ReminderStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         reminder_id = await loop.run_in_executor(
             None, self._add_reminder_sync, reminder
         )
@@ -169,8 +169,8 @@ class ReminderStorage:
         """
         await self.initialize()
 
-        now = datetime.now().isoformat()
-        loop = asyncio.get_event_loop()
+        now = datetime.now(UTC).isoformat()
+        loop = asyncio.get_running_loop()
         reminders = await loop.run_in_executor(None, self._get_due_reminders_sync, now)
         return reminders
 
@@ -200,7 +200,7 @@ class ReminderStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._mark_sent_sync, reminder_id)
         logger.info(f"Marked reminder {reminder_id} as sent")
 
@@ -230,7 +230,7 @@ class ReminderStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         reminders = await loop.run_in_executor(
             None, self._get_user_reminders_sync, user_id, include_sent
         )
@@ -279,7 +279,7 @@ class ReminderStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deleted = await loop.run_in_executor(
             None, self._delete_reminder_sync, reminder_id, user_id
         )

@@ -1,9 +1,10 @@
 """Custom tools for the LLM agent."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
+import dateparser
 from google.adk.tools import ToolContext
 
 from .reminders import Reminder, get_scheduler
@@ -85,7 +86,7 @@ async def schedule_reminder(
         }
 
     # Check if time is in the past
-    if trigger_time <= datetime.now():
+    if trigger_time <= datetime.now(UTC):
         return {
             "status": "error",
             "message": "The reminder time must be in the future.",
@@ -216,86 +217,37 @@ async def cancel_reminder(
 
 
 def _parse_reminder_datetime(datetime_str: str) -> datetime:
-    """Parse a datetime string into a datetime object.
+    """Parse a datetime string into a timezone-aware UTC datetime object.
 
-    Supports multiple formats:
-    - Absolute: "YYYY-MM-DD HH:MM", "YYYY-MM-DD at HH:MM"
-    - Relative: "in N minutes/hours", "tomorrow at HH:MM", "at HH:MM today"
+    Uses dateparser for robust natural language parsing. Supports:
+    - Absolute: "2026-03-15 14:30", "March 15, 2026 at 2pm"
+    - Relative: "in 30 minutes", "tomorrow at 9am", "in 2 hours"
+    - Natural language: "next Monday at 5pm", "at 5pm today"
 
     Args:
         datetime_str: The datetime string to parse.
 
     Returns:
-        A datetime object.
+        A timezone-aware datetime object in UTC.
 
     Raises:
         ValueError: If the string cannot be parsed.
     """
-    datetime_str = datetime_str.strip().lower()
-    now = datetime.now()
+    parsed_time = dateparser.parse(
+        datetime_str,
+        settings={"PREFER_DATES_FROM": "future", "TO_TIMEZONE": "UTC"},
+    )
+    if not parsed_time:
+        raise ValueError(f"Could not parse datetime: {datetime_str}")
 
-    # Try absolute format: "2026-03-15 14:30"
-    try:
-        return datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
-    except ValueError:
-        pass
+    # Ensure the datetime is timezone-aware in UTC
+    if parsed_time.tzinfo is None:
+        parsed_time = parsed_time.replace(tzinfo=UTC)
+    else:
+        # Convert to UTC if it has a different timezone
+        parsed_time = parsed_time.astimezone(UTC)
 
-    # Try "YYYY-MM-DD at HH:MM"
-    if " at " in datetime_str:
-        parts = datetime_str.split(" at ")
-        if len(parts) == 2:
-            try:
-                date_part = parts[0].strip()
-                time_part = parts[1].strip()
-                combined = f"{date_part} {time_part}"
-                return datetime.strptime(combined, "%Y-%m-%d %H:%M")
-            except ValueError:
-                pass
-
-    # Relative time: "in N minutes/hours"
-    if datetime_str.startswith("in "):
-        parts = datetime_str.split()
-        if len(parts) >= 3:
-            try:
-                amount = int(parts[1])
-                unit = parts[2]
-
-                if unit in ("minute", "minutes", "min", "mins"):
-                    return now + timedelta(minutes=amount)
-                elif unit in ("hour", "hours", "hr", "hrs"):
-                    return now + timedelta(hours=amount)
-            except (ValueError, IndexError):
-                pass
-
-    # "tomorrow at HH:MM" or "tomorrow HH:MM"
-    if datetime_str.startswith("tomorrow"):
-        tomorrow = now + timedelta(days=1)
-        time_part = datetime_str.replace("tomorrow", "").replace("at", "").strip()
-        if time_part:
-            try:
-                hour, minute = map(int, time_part.split(":"))
-                return tomorrow.replace(
-                    hour=hour, minute=minute, second=0, microsecond=0
-                )
-            except (ValueError, IndexError):
-                pass
-        # Default to same time tomorrow
-        return tomorrow.replace(second=0, microsecond=0)
-
-    # "at HH:MM today" or just "HH:MM" assumed today
-    if "at " in datetime_str or ":" in datetime_str:
-        time_str = datetime_str.replace("at", "").replace("today", "").strip()
-        try:
-            hour, minute = map(int, time_str.split(":"))
-            result = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            # If the time has passed today, assume tomorrow
-            if result <= now:
-                result += timedelta(days=1)
-            return result
-        except (ValueError, IndexError):
-            pass
-
-    raise ValueError(f"Could not parse datetime: {datetime_str}")
+    return parsed_time
 
 
 def _format_reminder(reminder: Reminder) -> dict[str, Any]:
