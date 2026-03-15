@@ -19,7 +19,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram._message import Message
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -36,9 +36,9 @@ load_dotenv()
 
 from .agent import root_agent  # noqa: E402
 from .telegram_handler import (  # noqa: E402
-    clear_session,
     initialize_runner,
     process_message,
+    reset_session,
 )
 
 # Configure logging
@@ -65,7 +65,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Commands:\n"
         "/start - Show this welcome message\n"
         "/help - Get help\n"
-        "/clear - Start a fresh conversation"
+        "/reset - Clear conversation and start fresh"
     )
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
@@ -83,21 +83,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Commands:*\n"
         "/start - Restart the bot\n"
         "/help - Show this help message\n"
-        "/clear - Clear conversation history and start fresh"
+        "/reset - Clear conversation and start fresh"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
 
-async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /clear command to reset conversation."""
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /reset command to reset session and start fresh."""
     if not update.message or not update.effective_user:
         return
 
     user_id = str(update.effective_user.id)
-    await clear_session(user_id=user_id)
-    await update.message.reply_text(
-        "🔄 Conversation cleared! Starting fresh.",
-    )
+    success = await reset_session(user_id=user_id)
+    if success:
+        await update.message.reply_text(
+            "✅ Session reset! A new conversation session has been created.",
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Failed to reset session. Please try again.",
+        )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -231,12 +236,14 @@ def create_application(token: str) -> Application:
     initialize_runner(agent=root_agent, app_name="telegram-adk-bot")
 
     # Create the Telegram Application
-    application = Application.builder().token(token).build()
+    application = (
+        Application.builder().token(token).post_init(_set_bot_commands).build()
+    )
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("clear", clear_command))
+    application.add_handler(CommandHandler("reset", reset_command))
 
     # Add message handler for text messages
     application.add_handler(
@@ -244,6 +251,24 @@ def create_application(token: str) -> Application:
     )
 
     return application
+
+
+async def _set_bot_commands(application: Application) -> None:
+    """Set bot commands for the Telegram command menu.
+
+    This registers the available commands with Telegram so users see
+    a popup menu when they type '/' in the chat.
+
+    Args:
+        application: The Telegram Application instance.
+    """
+    commands = [
+        BotCommand("start", "Show welcome message"),
+        BotCommand("help", "Display help information"),
+        BotCommand("reset", "Clear conversation and start fresh"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands registered with Telegram")
 
 
 def run_bot(token: str | None) -> int:

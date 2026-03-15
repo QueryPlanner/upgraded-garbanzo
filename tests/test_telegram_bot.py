@@ -9,10 +9,10 @@ from telegram.error import TelegramError
 from agent.telegram_bot import (
     _send_long_message,
     _split_and_send,
-    clear_command,
     create_application,
     handle_message,
     help_command,
+    reset_command,
     start_command,
 )
 
@@ -111,26 +111,45 @@ class TestHelpCommand:
         help_text = call_args[0][0]
         assert "/start" in help_text
         assert "/help" in help_text
-        assert "/clear" in help_text
+        assert "/reset" in help_text
 
 
-class TestClearCommand:
-    """Tests for clear_command function."""
+class TestResetCommand:
+    """Tests for reset_command function."""
 
     @pytest.mark.asyncio
-    async def test_clears_session_and_confirms(
+    async def test_resets_session_and_confirms(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:
-        """Test that session is cleared and confirmation sent."""
+        """Test that session is reset and confirmation sent."""
         with patch(
-            "agent.telegram_bot.clear_session", new_callable=AsyncMock
-        ) as mock_clear:
-            await clear_command(mock_update, mock_context)
+            "agent.telegram_bot.reset_session",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_reset:
+            await reset_command(mock_update, mock_context)
 
-            mock_clear.assert_called_once_with(user_id="12345")
+            mock_reset.assert_called_once_with(user_id="12345")
             mock_update.message.reply_text.assert_called_once()
             call_args = mock_update.message.reply_text.call_args
-            assert "Conversation cleared" in call_args[0][0]
+            assert "Session reset" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_shows_error_on_failure(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """Test that error message is shown when reset fails."""
+        with patch(
+            "agent.telegram_bot.reset_session",
+            new_callable=AsyncMock,
+            return_value=False,
+        ) as mock_reset:
+            await reset_command(mock_update, mock_context)
+
+            mock_reset.assert_called_once_with(user_id="12345")
+            mock_update.message.reply_text.assert_called_once()
+            call_args = mock_update.message.reply_text.call_args
+            assert "Failed to reset" in call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_returns_early_when_no_message(self, mock_context: MagicMock) -> None:
@@ -139,10 +158,12 @@ class TestClearCommand:
         update.message = None
         update.effective_user = MagicMock()
 
-        with patch("agent.telegram_bot.clear_session", new_callable=AsyncMock):
-            await clear_command(update, mock_context)
+        with patch(
+            "agent.telegram_bot.reset_session", new_callable=AsyncMock
+        ) as mock_reset:
+            await reset_command(update, mock_context)
 
-            assert True
+            mock_reset.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_returns_early_when_no_user(self, mock_context: MagicMock) -> None:
@@ -151,9 +172,13 @@ class TestClearCommand:
         update.message = MagicMock()
         update.effective_user = None
 
-        await clear_command(update, mock_context)
+        with patch(
+            "agent.telegram_bot.reset_session", new_callable=AsyncMock
+        ) as mock_reset:
+            await reset_command(update, mock_context)
 
-        assert True
+            mock_reset.assert_not_called()
+            update.message.reply_text.assert_not_called()
 
 
 class TestHandleMessage:
@@ -516,7 +541,7 @@ class TestCreateApplication:
 
             # Check that handlers are registered (stored in group 0 by default)
             handlers = app.handlers[0]
-            assert len(handlers) == 4  # start, help, clear, message handler
+            assert len(handlers) == 4  # start, help, reset, message handler
 
     def test_uses_root_agent(self) -> None:
         """Test that root_agent is used for initialization."""
@@ -529,6 +554,31 @@ class TestCreateApplication:
             mock_init.assert_called_once_with(
                 agent=mock_agent, app_name="telegram-adk-bot"
             )
+
+
+class TestSetBotCommands:
+    """Tests for _set_bot_commands function."""
+
+    @pytest.mark.asyncio
+    async def test_sets_bot_commands(self) -> None:
+        """Test that bot commands are registered with Telegram."""
+        mock_bot = MagicMock()
+        mock_bot.set_my_commands = AsyncMock()
+
+        mock_app = MagicMock()
+        mock_app.bot = mock_bot
+
+        from agent.telegram_bot import _set_bot_commands
+
+        await _set_bot_commands(mock_app)
+
+        mock_bot.set_my_commands.assert_called_once()
+        # Verify the commands include all expected commands
+        call_args = mock_bot.set_my_commands.call_args[0][0]
+        command_names = [cmd.command for cmd in call_args]
+        assert "start" in command_names
+        assert "help" in command_names
+        assert "reset" in command_names
 
 
 class TestRunBot:
