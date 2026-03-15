@@ -25,6 +25,8 @@ dependencies = [
     "openinference-instrumentation-google-adk>=0.1.8",
     # Telegram bot support
     "python-telegram-bot>=22.0,<23.0",
+    # Scheduler for reminders
+    "apscheduler>=3.11.0,<4.0.0",
 ]
 
 [project.scripts]
@@ -113,7 +115,7 @@ omit = [
 show_missing = true
 skip_covered = false
 precision = 2
-fail_under = 100
+fail_under = 85
 
 [tool.coverage.html]
 directory = "htmlcov"

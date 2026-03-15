@@ -65,11 +65,21 @@ class TelegramHandler:
         )
 
         if session is None:
+            # Create session with initial state containing user_id
             session = await self.runner.session_service.create_session(
                 app_name=self.app_name,
                 user_id=user_id,
                 session_id=effective_session_id,
+                state={"user_id": user_id},
             )
+            logger.info(f"Created new session with user_id={user_id}")
+        else:
+            # Update existing session state with user_id if not present
+            if "user_id" not in session.state:
+                session.state["user_id"] = user_id
+                logger.info(f"Updated session state with user_id={user_id}")
+
+        logger.info(f"Session state keys: {list(session.state.keys())}")
 
         # Create the user message
         content = types.Content(role="user", parts=[types.Part(text=message)])

@@ -1,13 +1,25 @@
 """Unit tests for custom tools."""
 
 import logging
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 # Import mock classes from conftest
 from conftest import MockState, MockToolContext
 
-from agent.tools import example_tool
+from agent.reminder_scheduler import ReminderScheduler
+from agent.reminder_storage import ReminderStorage
+from agent.tools import (
+    _parse_reminder_datetime,
+    cancel_reminder,
+    example_tool,
+    list_reminders,
+    schedule_reminder,
+)
 
 
 class TestExampleTool:
@@ -73,3 +85,222 @@ class TestExampleTool:
 
         # Verify logging occurred
         assert "Session state keys:" in caplog.text
+
+
+class TestParseReminderDatetime:
+    """Tests for _parse_reminder_datetime helper function."""
+
+    def test_parse_absolute_datetime(self) -> None:
+        """Test parsing absolute datetime format."""
+        result = _parse_reminder_datetime("2026-03-15 14:30")
+        assert result.year == 2026
+        assert result.month == 3
+        assert result.day == 15
+        assert result.hour == 14
+        assert result.minute == 30
+
+    def test_parse_in_minutes(self) -> None:
+        """Test parsing relative time in minutes."""
+        now = datetime.now()
+        result = _parse_reminder_datetime("in 30 minutes")
+        expected = now + timedelta(minutes=30)
+        # Allow 1 second tolerance
+        diff = abs((result - expected).total_seconds())
+        assert diff < 1
+
+    def test_parse_in_hours(self) -> None:
+        """Test parsing relative time in hours."""
+        now = datetime.now()
+        result = _parse_reminder_datetime("in 2 hours")
+        expected = now + timedelta(hours=2)
+        diff = abs((result - expected).total_seconds())
+        assert diff < 1
+
+    def test_parse_tomorrow(self) -> None:
+        """Test parsing tomorrow."""
+        now = datetime.now()
+        result = _parse_reminder_datetime("tomorrow")
+        assert result.day != now.day or result.month != now.month
+
+    def test_parse_tomorrow_with_time(self) -> None:
+        """Test parsing tomorrow with specific time."""
+        result = _parse_reminder_datetime("tomorrow at 09:30")
+        assert result.hour == 9
+        assert result.minute == 30
+
+    def test_parse_invalid_format_raises_error(self) -> None:
+        """Test that invalid format raises ValueError."""
+        with pytest.raises(ValueError):
+            _parse_reminder_datetime("invalid datetime")
+
+
+class TestScheduleReminder:
+    """Tests for schedule_reminder tool."""
+
+    @pytest.mark.asyncio
+    async def test_no_user_id_returns_error(self) -> None:
+        """Test that missing user_id returns error."""
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+
+        result = await schedule_reminder(
+            tool_context,  # type: ignore
+            message="Test reminder",
+            reminder_datetime="2026-03-15 14:30",
+        )
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_message_too_long_returns_error(self) -> None:
+        """Test that long message returns error."""
+        state = MockState({"user_id": "test_user"})
+        tool_context = MockToolContext(state=state)
+        long_message = "x" * 501
+
+        result = await schedule_reminder(
+            tool_context,  # type: ignore
+            message=long_message,
+            reminder_datetime="2026-03-15 14:30",
+        )
+
+        assert result["status"] == "error"
+        assert "too long" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_past_time_returns_error(self) -> None:
+        """Test that past time returns error."""
+        state = MockState({"user_id": "test_user"})
+        tool_context = MockToolContext(state=state)
+        past_time = "2020-01-01 10:00"
+
+        result = await schedule_reminder(
+            tool_context,  # type: ignore
+            message="Test reminder",
+            reminder_datetime=past_time,
+        )
+
+        assert result["status"] == "error"
+        assert "future" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_invalid_datetime_returns_error(self) -> None:
+        """Test that invalid datetime returns error."""
+        state = MockState({"user_id": "test_user"})
+        tool_context = MockToolContext(state=state)
+
+        result = await schedule_reminder(
+            tool_context,  # type: ignore
+            message="Test reminder",
+            reminder_datetime="not a valid datetime",
+        )
+
+        assert result["status"] == "error"
+        assert "time format" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_successful_schedule(self) -> None:
+        """Test successfully scheduling a reminder."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = Path(f.name)
+
+        try:
+            storage = ReminderStorage(db_path=db_path)
+            scheduler = ReminderScheduler()
+            scheduler.storage = storage
+
+            with patch("agent.tools.get_scheduler", return_value=scheduler):
+                state = MockState({"user_id": "test_user"})
+                tool_context = MockToolContext(state=state)
+
+                future_time = datetime.now() + timedelta(hours=1)
+                time_str = future_time.strftime("%Y-%m-%d %H:%M")
+
+                result = await schedule_reminder(
+                    tool_context,  # type: ignore
+                    message="Test reminder",
+                    reminder_datetime=time_str,
+                )
+
+                assert result["status"] == "success"
+                assert "reminder_id" in result
+        finally:
+            db_path.unlink(missing_ok=True)
+
+
+class TestListReminders:
+    """Tests for list_reminders tool."""
+
+    @pytest.mark.asyncio
+    async def test_no_user_id_returns_error(self) -> None:
+        """Test that missing user_id returns error."""
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+
+        result = await list_reminders(tool_context)  # type: ignore
+
+        assert result["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_empty_reminders_list(self) -> None:
+        """Test listing reminders when none exist."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = Path(f.name)
+
+        try:
+            storage = ReminderStorage(db_path=db_path)
+            scheduler = ReminderScheduler()
+            scheduler.storage = storage
+
+            with patch("agent.tools.get_scheduler", return_value=scheduler):
+                state = MockState({"user_id": "test_user"})
+                tool_context = MockToolContext(state=state)
+
+                result = await list_reminders(tool_context)  # type: ignore
+
+                assert result["status"] == "success"
+                assert result["reminders"] == []
+        finally:
+            db_path.unlink(missing_ok=True)
+
+
+class TestCancelReminder:
+    """Tests for cancel_reminder tool."""
+
+    @pytest.mark.asyncio
+    async def test_no_user_id_returns_error(self) -> None:
+        """Test that missing user_id returns error."""
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+
+        result = await cancel_reminder(
+            tool_context,  # type: ignore
+            reminder_id=1,
+        )
+
+        assert result["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_cancel_nonexistent_reminder(self) -> None:
+        """Test cancelling a non-existent reminder."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = Path(f.name)
+
+        try:
+            storage = ReminderStorage(db_path=db_path)
+            scheduler = ReminderScheduler()
+            scheduler.storage = storage
+
+            with patch("agent.tools.get_scheduler", return_value=scheduler):
+                state = MockState({"user_id": "test_user"})
+                tool_context = MockToolContext(state=state)
+
+                result = await cancel_reminder(
+                    tool_context,  # type: ignore
+                    reminder_id=999,
+                )
+
+                assert result["status"] == "error"
+        finally:
+            db_path.unlink(missing_ok=True)

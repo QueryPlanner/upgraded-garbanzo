@@ -541,7 +541,8 @@ class TestCreateApplication:
 
             # Check that handlers are registered (stored in group 0 by default)
             handlers = app.handlers[0]
-            assert len(handlers) == 4  # start, help, reset, message handler
+            # start, help, reset, reminders, message handler
+            assert len(handlers) == 5
 
     def test_uses_root_agent(self) -> None:
         """Test that root_agent is used for initialization."""

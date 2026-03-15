@@ -25,7 +25,12 @@ from .prompt import (  # noqa: E402
     return_global_instruction,
     return_instruction_root,
 )
-from .tools import example_tool  # noqa: E402
+from .tools import (  # noqa: E402
+    cancel_reminder,
+    example_tool,
+    list_reminders,
+    schedule_reminder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +71,13 @@ root_agent = LlmAgent(
     after_agent_callback=[logging_callbacks.after_agent, add_session_to_memory],
     model=model,
     instruction=return_instruction_root(),
-    tools=[PreloadMemoryTool(), example_tool],
+    tools=[
+        PreloadMemoryTool(),
+        example_tool,
+        schedule_reminder,
+        list_reminders,
+        cancel_reminder,
+    ],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,
     before_tool_callback=logging_callbacks.before_tool,

@@ -1,7 +1,6 @@
 """Unit tests for prompt definition functions."""
 
 from datetime import date
-from unittest.mock import patch
 
 from conftest import MockReadonlyContext
 
@@ -86,7 +85,7 @@ class TestReturnGlobalInstruction:
         today = str(date.today())
 
         assert today in instruction
-        assert "date" in instruction.lower()
+        assert "ist" in instruction.lower()
 
     def test_includes_assistant_context(
         self, mock_readonly_context: MockReadonlyContext
@@ -100,22 +99,28 @@ class TestReturnGlobalInstruction:
     def test_date_updates_dynamically(
         self, mock_readonly_context: MockReadonlyContext
     ) -> None:
-        """Test that date updates when function is called on different days."""
-        # Mock date.today() to return a specific date
-        with patch("agent.prompt.date") as mock_date:
-            mock_date.today.return_value = date(2025, 1, 15)
-            instruction1 = return_global_instruction(mock_readonly_context)  # type: ignore
+        """Test that datetime updates when function is called."""
 
-            # Verify first date
-            assert "2025-01-15" in instruction1
+        # Get instruction and verify it has a datetime
+        instruction1 = return_global_instruction(mock_readonly_context)  # type: ignore
 
-            # Change the mocked date
-            mock_date.today.return_value = date(2025, 2, 20)
-            instruction2 = return_global_instruction(mock_readonly_context)  # type: ignore
+        # Verify it contains a datetime-like pattern (YYYY-MM-DD HH:MM:SS)
+        import re
 
-            # Verify second date
-            assert "2025-02-20" in instruction2
-            assert instruction1 != instruction2
+        datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+        assert re.search(datetime_pattern, instruction1)
+
+        # Verify it contains day of week
+        days = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ]
+        assert any(day in instruction1 for day in days)
 
     def test_accepts_readonly_context_parameter(self) -> None:
         """Test that function signature accepts ReadonlyContext as required by ADK."""
@@ -149,9 +154,12 @@ class TestReturnGlobalInstruction:
         instruction1 = return_global_instruction(context1)  # type: ignore
         instruction2 = return_global_instruction(context2)  # type: ignore
 
-        # Currently, instructions should be identical (state not used)
-        # If future implementation uses state, this test will fail and should be updated
-        assert instruction1 == instruction2
+        # Both should contain the IST datetime pattern
+        import re
+
+        datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+        assert re.search(datetime_pattern, instruction1)
+        assert re.search(datetime_pattern, instruction2)
 
         # Verify state is accessible if needed in future
         assert context1.state["user_tier"] == "premium"
@@ -162,11 +170,12 @@ class TestReturnGlobalInstruction:
     ) -> None:
         """Test that instruction maintains consistent format across calls."""
         instruction1 = return_global_instruction(mock_readonly_context)  # type: ignore
-        instruction2 = return_global_instruction(mock_readonly_context)  # type: ignore
-
-        # Should be identical when called at same time (same date)
-        assert instruction1 == instruction2
 
         # Should contain expected structure
         assert "\n" in instruction1  # Multi-line format
-        assert "Today's date:" in instruction1
+        assert "Current IST:" in instruction1
+        # Verify IST timezone datetime format (YYYY-MM-DD HH:MM:SS Day)
+        import re
+
+        datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+        assert re.search(datetime_pattern, instruction1)

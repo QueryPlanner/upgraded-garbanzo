@@ -1,6 +1,7 @@
 """Prompt definitions for the LLM agent."""
 
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from google.adk.agents.readonly_context import ReadonlyContext
 
@@ -29,9 +30,9 @@ def return_instruction_root() -> str:
 
 
 def return_global_instruction(ctx: ReadonlyContext) -> str:
-    """Generate global instruction with current date.
+    """Generate global instruction with current IST date and time.
 
-    Uses InstructionProvider pattern to ensure date updates at request time.
+    Uses InstructionProvider pattern to ensure date/time updates at request time.
     GlobalInstructionPlugin expects signature: (ReadonlyContext) -> str
 
     Args:
@@ -39,8 +40,11 @@ def return_global_instruction(ctx: ReadonlyContext) -> str:
              Provides access to session state and metadata for future customization.
 
     Returns:
-        str: Global instruction string with dynamically generated current date.
+        str: Global instruction string with dynamically generated current IST datetime.
     """
     # ctx parameter required by GlobalInstructionPlugin interface
     # Currently unused but available for session-aware customization
-    return f"\n\nYou are a helpful Assistant.\nToday's date: {date.today()}"
+    ist = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    formatted_datetime = now_ist.strftime("%Y-%m-%d %H:%M:%S %A")
+    return f"\n\nYou are a helpful Assistant.\nCurrent IST: {formatted_datetime}"
