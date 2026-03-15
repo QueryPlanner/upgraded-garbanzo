@@ -13,6 +13,7 @@ We believe you should own your agents. This template is designed to strip away t
 - 🔭 **Open Observability**: Built-in OpenTelemetry (OTel) instrumentation. Pre-configured for **Langfuse**, but easily adaptable to Jaeger, Prometheus, or any OTel-compatible backend.
 - 🚀 **Modern Stack**: Python 3.13, `uv`, `fastapi`, `asyncpg`.
 - 💾 **Production Persistence**: Postgres-backed sessions out of the box.
+- ⏰ **Smart Reminders**: Schedule reminders via natural language with Telegram push notifications.
 
 ## Quickstart
 
@@ -74,6 +75,47 @@ docker compose up --build -d
 The template comes pre-wired with **OpenTelemetry**. By default, it's set up to export traces to **Langfuse** for beautiful, actionable insights into your agent's performance and costs.
 
 To change the backend, simply update the OTel exporter configuration in your `.env`. You are not locked into any specific observability vendor.
+
+## Telegram Bot Integration
+
+This project includes a Telegram bot integration that allows users to interact with the ADK agent through Telegram.
+
+### Setup
+
+1. **Create a Telegram Bot:**
+   - Open Telegram and search for `@BotFather`
+   - Send `/newbot` and follow the prompts
+   - Save the bot token you receive
+
+2. **Configure Environment:**
+   ```bash
+   # Add to your .env file
+   TELEGRAM_BOT_TOKEN=your-telegram-bot-token-here
+   ```
+
+3. **Run the Bot:**
+   ```bash
+   uv run telegram-bot
+   ```
+
+### Available Commands
+
+| Command | Description |
+| :--- | :--- |
+| `/start` | Show welcome message |
+| `/help` | Display help information |
+| `/reset` | Clear conversation and start fresh |
+| `/reminders` | List your scheduled reminders |
+
+### Reminder Features
+
+Ask the bot to schedule reminders using natural language:
+
+- `"Remind me to take a break in 30 minutes"`
+- `"Remind me about the meeting at 3pm today"`
+- `"Remind me tomorrow at 9am to check emails"`
+
+Reminders are stored persistently in SQLite and sent via Telegram push notifications.
 
 ## Documentation
 

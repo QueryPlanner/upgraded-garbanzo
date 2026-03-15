@@ -10,13 +10,14 @@ Setup Instructions:
 
 Usage:
     - Send any message to interact with the agent
-    - Use /clear to start a new conversation
+    - Use /reset to start a new conversation
     - Use /help to see available commands
 """
 
 import logging
 import os
 import sys
+from datetime import datetime
 
 from dotenv import load_dotenv
 from telegram import BotCommand, Update
@@ -34,8 +35,9 @@ from telegram.ext import (
 # Load environment variables from .env file
 load_dotenv()
 
-from .agent import root_agent  # noqa: E402
-from .telegram_handler import (  # noqa: E402
+from ..agent import root_agent  # noqa: E402
+from ..reminders import get_scheduler  # noqa: E402
+from .handler import (  # noqa: E402
     initialize_runner,
     process_message,
     reset_session,
@@ -65,7 +67,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Commands:\n"
         "/start - Show this welcome message\n"
         "/help - Get help\n"
-        "/reset - Clear conversation and start fresh"
+        "/reset - Clear conversation and start fresh\n"
+        "/reminders - List your scheduled reminders\n\n"
+        "*Reminders:* Ask me to remind you about things!\n"
+        'Example: "Remind me in 30 minutes to take a break"'
     )
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
@@ -83,7 +88,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Commands:*\n"
         "/start - Restart the bot\n"
         "/help - Show this help message\n"
-        "/reset - Clear conversation and start fresh"
+        "/reset - Clear conversation and start fresh\n"
+        "/reminders - List your scheduled reminders\n\n"
+        "*Reminders:*\n"
+        "You can ask me to set reminders like:\n"
+        '• "Remind me to call mom in 30 minutes"\n'
+        '• "Remind me about the meeting at 3pm today"\n'
+        '• "Remind me tomorrow at 9am to check emails"'
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -102,6 +113,41 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         await update.message.reply_text(
             "❌ Failed to reset session. Please try again.",
+        )
+
+
+async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /reminders command to list user's reminders."""
+    if not update.message or not update.effective_user:
+        return
+
+    user_id = str(update.effective_user.id)
+    scheduler = get_scheduler()
+
+    try:
+        reminders = await scheduler.get_user_reminders(user_id, include_sent=False)
+
+        if not reminders:
+            await update.message.reply_text(
+                "📭 You have no scheduled reminders.\n\n"
+                'Try saying: "Remind me in 30 minutes to take a break"'
+            )
+            return
+
+        # Format reminders list
+        lines = ["⏰ *Your Scheduled Reminders:*\n"]
+        for r in reminders:
+            trigger_dt = datetime.fromisoformat(r.trigger_time)
+            time_str = trigger_dt.strftime("%Y-%m-%d %H:%M")
+            msg_preview = r.message[:40] + "..." if len(r.message) > 40 else r.message
+            lines.append(f"• *#{r.id}* - {time_str}\n  _{msg_preview}_")
+
+        lines.append('\nTo cancel, say: "Cancel reminder #N"')
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    except Exception:
+        logger.exception("Failed to list reminders")
+        await update.message.reply_text(
+            "❌ Failed to retrieve reminders. Please try again later."
         )
 
 
@@ -244,6 +290,7 @@ def create_application(token: str) -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("reset", reset_command))
+    application.add_handler(CommandHandler("reminders", reminders_command))
 
     # Add message handler for text messages
     application.add_handler(
@@ -254,10 +301,11 @@ def create_application(token: str) -> Application:
 
 
 async def _set_bot_commands(application: Application) -> None:
-    """Set bot commands for the Telegram command menu.
+    """Set bot commands for the Telegram command menu and start scheduler.
 
     This registers the available commands with Telegram so users see
-    a popup menu when they type '/' in the chat.
+    a popup menu when they type '/' in the chat. Also initializes the
+    reminder scheduler with the bot instance.
 
     Args:
         application: The Telegram Application instance.
@@ -266,9 +314,16 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("start", "Show welcome message"),
         BotCommand("help", "Display help information"),
         BotCommand("reset", "Clear conversation and start fresh"),
+        BotCommand("reminders", "List your scheduled reminders"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands registered with Telegram")
+
+    # Initialize and start the reminder scheduler
+    scheduler = get_scheduler()
+    scheduler.set_bot(application.bot)
+    await scheduler.start()
+    logger.info("Reminder scheduler started")
 
 
 def run_bot(token: str | None) -> int:
