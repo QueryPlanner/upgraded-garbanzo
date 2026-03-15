@@ -20,7 +20,9 @@ import sys
 
 from dotenv import load_dotenv
 from telegram import Update
+from telegram._message import Message
 from telegram.constants import ParseMode
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -128,15 +130,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if len(response) <= MAX_MESSAGE_LENGTH:
             await update.message.reply_text(response)
         else:
-            # Split into chunks
-            chunks = [
-                response[i : i + MAX_MESSAGE_LENGTH]
-                for i in range(0, len(response), MAX_MESSAGE_LENGTH)
-            ]
-            for chunk in chunks:
-                await update.message.reply_text(chunk)
+            # Split into chunks at natural boundaries when possible
+            await _send_long_message(update.message, response)
 
+    except TelegramError as e:
+        logger.error(f"Telegram API error for user {user_id}: {e}")
+        await update.message.reply_text(
+            "❌ Sorry, there was a problem sending the response. "
+            "Please try again later."
+        )
     except Exception:
+        # Catch-all for unexpected errors, but let critical exceptions propagate
         logger.exception(f"Error processing message for user {user_id}")
         await update.message.reply_text(
             "❌ Sorry, an error occurred while processing your message. "
@@ -144,17 +148,90 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 
-def main() -> None:
-    """Run the Telegram bot."""
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN environment variable is required")
-        sys.exit(1)
+async def _send_long_message(message: Message, text: str) -> None:
+    """Send a long message by splitting it at natural boundaries.
 
+    This function attempts to split messages at paragraph breaks, newlines,
+    or sentence boundaries to preserve formatting and readability.
+
+    Args:
+        message: The Telegram message object to reply to.
+        text: The text to send.
+    """
+    # Try to split at paragraph breaks first (double newlines)
+    paragraphs = text.split("\n\n")
+    current_chunk = ""
+
+    for paragraph in paragraphs:
+        # Check if adding this paragraph would exceed the limit
+        if (
+            current_chunk
+            and len(current_chunk) + 2 + len(paragraph) > MAX_MESSAGE_LENGTH
+        ):
+            # Send current chunk
+            await message.reply_text(current_chunk.strip())
+            current_chunk = paragraph
+        elif current_chunk:
+            current_chunk += "\n\n" + paragraph
+        else:
+            current_chunk = paragraph
+
+    # Send remaining content
+    if current_chunk:
+        if len(current_chunk) <= MAX_MESSAGE_LENGTH:
+            await message.reply_text(current_chunk.strip())
+        else:
+            # Fallback: split at single newlines or character boundaries
+            await _split_and_send(message, current_chunk)
+
+
+async def _split_and_send(message: Message, text: str) -> None:
+    """Fallback splitter for text that can't be split at paragraph boundaries.
+
+    Args:
+        message: The Telegram message object to reply to.
+        text: The text to send (may exceed MAX_MESSAGE_LENGTH).
+    """
+    remaining = text
+
+    while remaining:  # pragma: no branch
+        if len(remaining) <= MAX_MESSAGE_LENGTH:
+            await message.reply_text(remaining.strip())
+            break
+
+        # Try to find a good split point
+        split_point = MAX_MESSAGE_LENGTH
+
+        # Look for newline near the limit
+        newline_pos = remaining.rfind("\n", 0, MAX_MESSAGE_LENGTH)
+        if newline_pos > MAX_MESSAGE_LENGTH // 2:
+            split_point = newline_pos + 1
+        else:
+            # Look for space near the limit
+            space_pos = remaining.rfind(" ", 0, MAX_MESSAGE_LENGTH)
+            if space_pos > MAX_MESSAGE_LENGTH // 2:
+                split_point = space_pos + 1
+
+        chunk = remaining[:split_point].strip()
+        if chunk:
+            await message.reply_text(chunk)
+        remaining = remaining[split_point:]
+
+
+def create_application(token: str) -> Application:
+    """Create and configure the Telegram Application.
+
+    Args:
+        token: The Telegram bot token.
+
+    Returns:
+        Configured Application instance with handlers registered.
+    """
     # Initialize the ADK runner with the root agent
     initialize_runner(agent=root_agent, app_name="telegram-adk-bot")
 
     # Create the Telegram Application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application = Application.builder().token(token).build()
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
@@ -166,10 +243,36 @@ def main() -> None:
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
 
+    return application
+
+
+def run_bot(token: str | None) -> int:
+    """Run the Telegram bot and return exit code.
+
+    Args:
+        token: The Telegram bot token, or None if not configured.
+
+    Returns:
+        0 on success, 1 on error (missing token).
+    """
+    if not token:
+        logger.error("TELEGRAM_BOT_TOKEN environment variable is required")
+        return 1
+
+    application = create_application(token)
+
     # Start the bot
     logger.info("Starting Telegram bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+    return 0
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the Telegram bot."""
+    exit_code = run_bot(TELEGRAM_BOT_TOKEN)
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+
+if __name__ == "__main__":  # pragma: no cover
     main()

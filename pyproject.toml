@@ -105,7 +105,6 @@ branch = true
 omit = [
     "src/agent/**/__init__.py",
     "src/agent/server.py",
-    "src/agent/telegram_bot.py",
     "src/agent/**/agent.py",
     "src/agent/utils/observability.py",
 ]
