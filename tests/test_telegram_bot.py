@@ -594,6 +594,32 @@ class TestCreateApplication:
             )
 
 
+class TestSetBotCommands:
+    """Tests for _set_bot_commands function."""
+
+    @pytest.mark.asyncio
+    async def test_sets_bot_commands(self) -> None:
+        """Test that bot commands are registered with Telegram."""
+        mock_bot = MagicMock()
+        mock_bot.set_my_commands = AsyncMock()
+
+        mock_app = MagicMock()
+        mock_app.bot = mock_bot
+
+        from agent.telegram_bot import _set_bot_commands
+
+        await _set_bot_commands(mock_app)
+
+        mock_bot.set_my_commands.assert_called_once()
+        # Verify the commands include all expected commands
+        call_args = mock_bot.set_my_commands.call_args[0][0]
+        command_names = [cmd.command for cmd in call_args]
+        assert "start" in command_names
+        assert "help" in command_names
+        assert "clear" in command_names
+        assert "reset" in command_names
+
+
 class TestRunBot:
     """Tests for run_bot function."""
 

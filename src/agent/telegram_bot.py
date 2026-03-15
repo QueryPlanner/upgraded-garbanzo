@@ -19,7 +19,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram._message import Message
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -251,7 +251,9 @@ def create_application(token: str) -> Application:
     initialize_runner(agent=root_agent, app_name="telegram-adk-bot")
 
     # Create the Telegram Application
-    application = Application.builder().token(token).build()
+    application = (
+        Application.builder().token(token).post_init(_set_bot_commands).build()
+    )
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
@@ -265,6 +267,25 @@ def create_application(token: str) -> Application:
     )
 
     return application
+
+
+async def _set_bot_commands(application: Application) -> None:
+    """Set bot commands for the Telegram command menu.
+
+    This registers the available commands with Telegram so users see
+    a popup menu when they type '/' in the chat.
+
+    Args:
+        application: The Telegram Application instance.
+    """
+    commands = [
+        BotCommand("start", "Show welcome message"),
+        BotCommand("help", "Display help information"),
+        BotCommand("clear", "Clear conversation history"),
+        BotCommand("reset", "Reset session and start fresh"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands registered with Telegram")
 
 
 def run_bot(token: str | None) -> int:
