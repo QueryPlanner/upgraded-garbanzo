@@ -91,3 +91,6 @@ pip-wheel-metadata/
 **/.adk/
 
 \n# Local conductor directory\nconductor/
+
+# User-specific context (not for version control)
+.context/USER.md

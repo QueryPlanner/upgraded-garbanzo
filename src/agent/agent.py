@@ -25,10 +25,19 @@ from .prompt import (  # noqa: E402
     return_global_instruction,
     return_instruction_root,
 )
+from .skills.loader import create_skill_toolset  # noqa: E402
 from .tools import (  # noqa: E402
+    add_calories,
     cancel_reminder,
+    delete_fitness_entry,
     example_tool,
+    execute_bash,
+    get_calorie_stats,
+    get_workout_stats,
+    list_calories,
     list_reminders,
+    list_workouts,
+    log_workout,
     schedule_reminder,
 )
 
@@ -64,6 +73,10 @@ logger.info(f"Creating LiteLlm with model: {model_name}")
 model = LiteLlm(**litellm_kwargs)
 logger.info("LiteLlm model created successfully")
 
+# Create skill toolset for lazy-loading capabilities
+skill_toolset = create_skill_toolset()
+logger.info("Skill toolset created")
+
 root_agent = LlmAgent(
     name="root_agent",
     description=return_description_root(),
@@ -74,9 +87,22 @@ root_agent = LlmAgent(
     tools=[
         PreloadMemoryTool(),
         example_tool,
+        # Reminder tools
         schedule_reminder,
         list_reminders,
         cancel_reminder,
+        # Fitness tracking tools
+        add_calories,
+        list_calories,
+        get_calorie_stats,
+        log_workout,
+        list_workouts,
+        get_workout_stats,
+        delete_fitness_entry,
+        # Utility tools
+        execute_bash,
+        # Skills (lazy-loaded toolsets)
+        skill_toolset,
     ],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,
