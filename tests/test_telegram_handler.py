@@ -9,7 +9,6 @@ from google.genai import types
 
 from agent.telegram_handler import (
     TelegramHandler,
-    clear_session,
     initialize_runner,
     process_message,
     reset_session,
@@ -257,74 +256,6 @@ class TestTelegramHandler:
         assert response == "Response"
 
     @pytest.mark.asyncio
-    async def test_clear_session_returns_true(self, mock_agent: MagicMock) -> None:
-        """Test that session is cleared and True is returned."""
-        handler = TelegramHandler(mock_agent, app_name="test-app")
-
-        result = await handler.clear_session("user-1")
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_clear_session_uses_user_id_as_session_id(
-        self, mock_agent: MagicMock
-    ) -> None:
-        """Test that user_id is used as session_id when not provided."""
-        handler = TelegramHandler(mock_agent, app_name="test-app")
-
-        # Mock the delete_session method
-        with patch.object(
-            handler.runner.session_service, "delete_session", new_callable=AsyncMock
-        ) as mock_delete:
-            await handler.clear_session("user-456")
-
-            mock_delete.assert_called_once_with(
-                app_name="test-app",
-                user_id="user-456",
-                session_id="user-456",
-            )
-
-    @pytest.mark.asyncio
-    async def test_clear_session_uses_provided_session_id(
-        self, mock_agent: MagicMock
-    ) -> None:
-        """Test that provided session_id is used."""
-        handler = TelegramHandler(mock_agent, app_name="test-app")
-
-        # Mock the delete_session method
-        with patch.object(
-            handler.runner.session_service, "delete_session", new_callable=AsyncMock
-        ) as mock_delete:
-            await handler.clear_session("user-1", session_id="custom-session")
-
-            mock_delete.assert_called_once_with(
-                app_name="test-app",
-                user_id="user-1",
-                session_id="custom-session",
-            )
-
-    @pytest.mark.asyncio
-    async def test_clear_session_logs_exception_and_returns_false(
-        self, mock_agent: MagicMock
-    ) -> None:
-        """Test that exceptions are logged and False is returned."""
-        handler = TelegramHandler(mock_agent, app_name="test-app")
-
-        with (
-            patch.object(
-                handler.runner.session_service,
-                "delete_session",
-                new_callable=AsyncMock,
-                side_effect=Exception("Session not found"),
-            ),
-            patch("agent.telegram_handler.logger") as mock_logger,
-        ):
-            result = await handler.clear_session("user-1")
-
-            assert result is False
-            mock_logger.exception.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_reset_session_deletes_and_creates_new(
         self, mock_agent: MagicMock
     ) -> None:
@@ -483,30 +414,6 @@ class TestProcessMessageFunction:
             response = await process_message("user-1", "Hello")
 
         assert response == "Response"
-
-
-class TestClearSessionFunction:
-    """Tests for module-level clear_session function (backwards compatibility)."""
-
-    @pytest.mark.asyncio
-    async def test_returns_false_when_handler_not_initialized(self) -> None:
-        """Test that False is returned when handler not initialized."""
-        from agent import telegram_handler
-
-        telegram_handler._handler = None
-
-        result = await clear_session("user-1")
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_delegates_to_handler(self, mock_agent: MagicMock) -> None:
-        """Test that function delegates to handler instance."""
-        initialize_runner(mock_agent, app_name="test-app")
-
-        result = await clear_session("user-1")
-
-        assert result is True
 
 
 class TestResetSessionFunction:

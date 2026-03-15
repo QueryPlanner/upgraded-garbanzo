@@ -36,7 +36,6 @@ load_dotenv()
 
 from .agent import root_agent  # noqa: E402
 from .telegram_handler import (  # noqa: E402
-    clear_session,
     initialize_runner,
     process_message,
     reset_session,
@@ -66,8 +65,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Commands:\n"
         "/start - Show this welcome message\n"
         "/help - Get help\n"
-        "/clear - Clear conversation history\n"
-        "/reset - Reset session and start fresh"
+        "/reset - Clear conversation and start fresh"
     )
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
@@ -85,22 +83,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Commands:*\n"
         "/start - Restart the bot\n"
         "/help - Show this help message\n"
-        "/clear - Clear conversation history\n"
-        "/reset - Reset session and start fresh"
+        "/reset - Clear conversation and start fresh"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
-
-
-async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /clear command to reset conversation."""
-    if not update.message or not update.effective_user:
-        return
-
-    user_id = str(update.effective_user.id)
-    await clear_session(user_id=user_id)
-    await update.message.reply_text(
-        "🔄 Conversation cleared! Starting fresh.",
-    )
 
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -258,7 +243,6 @@ def create_application(token: str) -> Application:
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("clear", clear_command))
     application.add_handler(CommandHandler("reset", reset_command))
 
     # Add message handler for text messages
@@ -281,8 +265,7 @@ async def _set_bot_commands(application: Application) -> None:
     commands = [
         BotCommand("start", "Show welcome message"),
         BotCommand("help", "Display help information"),
-        BotCommand("clear", "Clear conversation history"),
-        BotCommand("reset", "Reset session and start fresh"),
+        BotCommand("reset", "Clear conversation and start fresh"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands registered with Telegram")

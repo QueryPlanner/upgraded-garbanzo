@@ -9,7 +9,6 @@ from telegram.error import TelegramError
 from agent.telegram_bot import (
     _send_long_message,
     _split_and_send,
-    clear_command,
     create_application,
     handle_message,
     help_command,
@@ -112,50 +111,7 @@ class TestHelpCommand:
         help_text = call_args[0][0]
         assert "/start" in help_text
         assert "/help" in help_text
-        assert "/clear" in help_text
         assert "/reset" in help_text
-
-
-class TestClearCommand:
-    """Tests for clear_command function."""
-
-    @pytest.mark.asyncio
-    async def test_clears_session_and_confirms(
-        self, mock_update: MagicMock, mock_context: MagicMock
-    ) -> None:
-        """Test that session is cleared and confirmation sent."""
-        with patch(
-            "agent.telegram_bot.clear_session", new_callable=AsyncMock
-        ) as mock_clear:
-            await clear_command(mock_update, mock_context)
-
-            mock_clear.assert_called_once_with(user_id="12345")
-            mock_update.message.reply_text.assert_called_once()
-            call_args = mock_update.message.reply_text.call_args
-            assert "Conversation cleared" in call_args[0][0]
-
-    @pytest.mark.asyncio
-    async def test_returns_early_when_no_message(self, mock_context: MagicMock) -> None:
-        """Test that function returns early when no message."""
-        update = MagicMock(spec=Update)
-        update.message = None
-        update.effective_user = MagicMock()
-
-        with patch("agent.telegram_bot.clear_session", new_callable=AsyncMock):
-            await clear_command(update, mock_context)
-
-            assert True
-
-    @pytest.mark.asyncio
-    async def test_returns_early_when_no_user(self, mock_context: MagicMock) -> None:
-        """Test that function returns early when no effective_user."""
-        update = MagicMock(spec=Update)
-        update.message = MagicMock()
-        update.effective_user = None
-
-        await clear_command(update, mock_context)
-
-        assert True
 
 
 class TestResetCommand:
@@ -585,7 +541,7 @@ class TestCreateApplication:
 
             # Check that handlers are registered (stored in group 0 by default)
             handlers = app.handlers[0]
-            assert len(handlers) == 5  # start, help, clear, reset, message handler
+            assert len(handlers) == 4  # start, help, reset, message handler
 
     def test_uses_root_agent(self) -> None:
         """Test that root_agent is used for initialization."""
@@ -622,7 +578,6 @@ class TestSetBotCommands:
         command_names = [cmd.command for cmd in call_args]
         assert "start" in command_names
         assert "help" in command_names
-        assert "clear" in command_names
         assert "reset" in command_names
 
 

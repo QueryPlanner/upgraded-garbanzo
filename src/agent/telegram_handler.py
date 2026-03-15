@@ -97,35 +97,6 @@ class TelegramHandler:
 
         return "".join(response_parts)
 
-    async def clear_session(self, user_id: str, session_id: str | None = None) -> bool:
-        """Clear a user's session to start a fresh conversation.
-
-        Args:
-            user_id: The user's unique identifier.
-            session_id: Optional specific session ID. Uses user_id if not provided.
-
-        Returns:
-            True if session was cleared, False if it didn't exist or failed.
-        """
-        effective_session_id = session_id or user_id
-
-        try:
-            await self.runner.session_service.delete_session(
-                app_name=self.app_name,
-                user_id=user_id,
-                session_id=effective_session_id,
-            )
-            logger.info(
-                f"Cleared session for user={user_id}, session={effective_session_id}"
-            )
-            return True
-        except Exception:
-            logger.exception(
-                f"Failed to clear session for user={user_id}, "
-                f"session={effective_session_id}"
-            )
-            return False
-
     async def reset_session(self, user_id: str, session_id: str | None = None) -> bool:
         """Reset a user's session by deleting and creating a fresh one.
 
@@ -232,24 +203,6 @@ async def process_message(
     return await _handler.process_message(
         user_id=user_id, message=message, session_id=session_id
     )
-
-
-async def clear_session(user_id: str, session_id: str | None = None) -> bool:
-    """Clear a user's session to start a fresh conversation.
-
-    This function is maintained for backwards compatibility.
-    Consider using the TelegramHandler class directly for new code.
-
-    Args:
-        user_id: The user's unique identifier.
-        session_id: Optional specific session ID. Uses user_id if not provided.
-
-    Returns:
-        True if session was cleared, False if it didn't exist.
-    """
-    if _handler is None:
-        return False
-    return await _handler.clear_session(user_id=user_id, session_id=session_id)
 
 
 async def reset_session(user_id: str, session_id: str | None = None) -> bool:
