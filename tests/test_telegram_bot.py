@@ -581,6 +581,9 @@ class TestMain:
 
         import agent.telegram_bot as bot_module
 
-        with patch.object(bot_module, "create_application", return_value=mock_app):
+        with (
+            patch.object(bot_module, "TELEGRAM_BOT_TOKEN", "test-token"),
+            patch.object(bot_module, "create_application", return_value=mock_app),
+        ):
             bot_module.main()
             # If no exception, the test passes
