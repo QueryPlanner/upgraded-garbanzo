@@ -126,6 +126,51 @@ class TelegramHandler:
             )
             return False
 
+    async def reset_session(self, user_id: str, session_id: str | None = None) -> bool:
+        """Reset a user's session by deleting and creating a fresh one.
+
+        This method deletes the existing session and creates a new one immediately,
+        providing a complete reset of conversation state.
+
+        Args:
+            user_id: The user's unique identifier.
+            session_id: Optional specific session ID. Uses user_id if not provided.
+
+        Returns:
+            True if session was reset successfully, False otherwise.
+        """
+        effective_session_id = session_id or user_id
+
+        try:
+            # Delete existing session if it exists
+            await self.runner.session_service.delete_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=effective_session_id,
+            )
+            logger.info(
+                f"Deleted existing session for user={user_id}, "
+                f"session={effective_session_id}"
+            )
+
+            # Create a fresh session
+            await self.runner.session_service.create_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=effective_session_id,
+            )
+            logger.info(
+                f"Created new session for user={user_id}, "
+                f"session={effective_session_id}"
+            )
+            return True
+        except Exception:
+            logger.exception(
+                f"Failed to reset session for user={user_id}, "
+                f"session={effective_session_id}"
+            )
+            return False
+
 
 # Global handler instance for backwards compatibility with module-level functions
 _handler: TelegramHandler | None = None
@@ -196,3 +241,21 @@ async def clear_session(user_id: str, session_id: str | None = None) -> bool:
     if _handler is None:
         return False
     return await _handler.clear_session(user_id=user_id, session_id=session_id)
+
+
+async def reset_session(user_id: str, session_id: str | None = None) -> bool:
+    """Reset a user's session by deleting and creating a fresh one.
+
+    This function is maintained for backwards compatibility.
+    Consider using the TelegramHandler class directly for new code.
+
+    Args:
+        user_id: The user's unique identifier.
+        session_id: Optional specific session ID. Uses user_id if not provided.
+
+    Returns:
+        True if session was reset successfully, False otherwise.
+    """
+    if _handler is None:
+        return False
+    return await _handler.reset_session(user_id=user_id, session_id=session_id)

@@ -39,6 +39,7 @@ from .telegram_handler import (  # noqa: E402
     clear_session,
     initialize_runner,
     process_message,
+    reset_session,
 )
 
 # Configure logging
@@ -65,7 +66,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Commands:\n"
         "/start - Show this welcome message\n"
         "/help - Get help\n"
-        "/clear - Start a fresh conversation"
+        "/clear - Clear conversation history\n"
+        "/reset - Reset session and start fresh"
     )
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
@@ -83,7 +85,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Commands:*\n"
         "/start - Restart the bot\n"
         "/help - Show this help message\n"
-        "/clear - Clear conversation history and start fresh"
+        "/clear - Clear conversation history\n"
+        "/reset - Reset session and start fresh"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -98,6 +101,23 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         "🔄 Conversation cleared! Starting fresh.",
     )
+
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /reset command to reset session and start fresh."""
+    if not update.message or not update.effective_user:
+        return
+
+    user_id = str(update.effective_user.id)
+    success = await reset_session(user_id=user_id)
+    if success:
+        await update.message.reply_text(
+            "✅ Session reset! A new conversation session has been created.",
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Failed to reset session. Please try again.",
+        )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -237,6 +257,7 @@ def create_application(token: str) -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    application.add_handler(CommandHandler("reset", reset_command))
 
     # Add message handler for text messages
     application.add_handler(
