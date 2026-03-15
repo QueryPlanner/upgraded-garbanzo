@@ -1,0 +1,278 @@
+"""Telegram bot runner for the ADK agent.
+
+This script starts a Telegram bot that connects to your ADK agent,
+allowing users to interact with the agent through Telegram messages.
+
+Setup Instructions:
+1. Create a bot via @BotFather on Telegram and get your bot token
+2. Set TELEGRAM_BOT_TOKEN environment variable
+3. Run: uv run telegram-bot
+
+Usage:
+    - Send any message to interact with the agent
+    - Use /clear to start a new conversation
+    - Use /help to see available commands
+"""
+
+import logging
+import os
+import sys
+
+from dotenv import load_dotenv
+from telegram import Update
+from telegram._message import Message
+from telegram.constants import ParseMode
+from telegram.error import TelegramError
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+# Load environment variables from .env file
+load_dotenv()
+
+from .agent import root_agent  # noqa: E402
+from .telegram_handler import (  # noqa: E402
+    clear_session,
+    initialize_runner,
+    process_message,
+)
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+# Bot configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+MAX_MESSAGE_LENGTH = 4096  # Telegram's message limit
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /start command."""
+    if not update.message:
+        return
+
+    welcome_message = (
+        "🤖 *Welcome to the ADK Agent Bot!*\n\n"
+        "I'm an AI assistant powered by Google ADK. "
+        "Send me any message and I'll help you!\n\n"
+        "Commands:\n"
+        "/start - Show this welcome message\n"
+        "/help - Get help\n"
+        "/clear - Start a fresh conversation"
+    )
+    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /help command."""
+    if not update.message:
+        return
+
+    help_text = (
+        "🤖 *ADK Agent Bot Help*\n\n"
+        "*How to use:*\n"
+        "• Just send me a message and I'll respond\n"
+        "• I remember our conversation context\n\n"
+        "*Commands:*\n"
+        "/start - Restart the bot\n"
+        "/help - Show this help message\n"
+        "/clear - Clear conversation history and start fresh"
+    )
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /clear command to reset conversation."""
+    if not update.message or not update.effective_user:
+        return
+
+    user_id = str(update.effective_user.id)
+    await clear_session(user_id=user_id)
+    await update.message.reply_text(
+        "🔄 Conversation cleared! Starting fresh.",
+    )
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming text messages and forward to the ADK agent."""
+    if not update.message or not update.message.text:
+        return
+
+    if not update.effective_user or not update.effective_chat:
+        return
+
+    user_id = str(update.effective_user.id)
+    user_message = update.message.text
+
+    logger.info(f"Message from {user_id}: {user_message[:50]}...")
+
+    # Send typing indicator
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action="typing",
+    )
+
+    try:
+        # Process message through ADK agent
+        response = await process_message(
+            user_id=user_id,
+            message=user_message,
+        )
+
+        # Split long messages if needed (Telegram has 4096 char limit)
+        if len(response) <= MAX_MESSAGE_LENGTH:
+            await update.message.reply_text(response)
+        else:
+            # Split into chunks at natural boundaries when possible
+            await _send_long_message(update.message, response)
+
+    except TelegramError as e:
+        logger.error(f"Telegram API error for user {user_id}: {e}")
+        await update.message.reply_text(
+            "❌ Sorry, there was a problem sending the response. "
+            "Please try again later."
+        )
+    except Exception:
+        # Catch-all for unexpected errors, but let critical exceptions propagate
+        logger.exception(f"Error processing message for user {user_id}")
+        await update.message.reply_text(
+            "❌ Sorry, an error occurred while processing your message. "
+            "Please try again later."
+        )
+
+
+async def _send_long_message(message: Message, text: str) -> None:
+    """Send a long message by splitting it at natural boundaries.
+
+    This function attempts to split messages at paragraph breaks, newlines,
+    or sentence boundaries to preserve formatting and readability.
+
+    Args:
+        message: The Telegram message object to reply to.
+        text: The text to send.
+    """
+    # Try to split at paragraph breaks first (double newlines)
+    paragraphs = text.split("\n\n")
+    current_chunk = ""
+
+    for paragraph in paragraphs:
+        # Check if adding this paragraph would exceed the limit
+        if (
+            current_chunk
+            and len(current_chunk) + 2 + len(paragraph) > MAX_MESSAGE_LENGTH
+        ):
+            # Send current chunk
+            await message.reply_text(current_chunk.strip())
+            current_chunk = paragraph
+        elif current_chunk:
+            current_chunk += "\n\n" + paragraph
+        else:
+            current_chunk = paragraph
+
+    # Send remaining content
+    if current_chunk:
+        if len(current_chunk) <= MAX_MESSAGE_LENGTH:
+            await message.reply_text(current_chunk.strip())
+        else:
+            # Fallback: split at single newlines or character boundaries
+            await _split_and_send(message, current_chunk)
+
+
+async def _split_and_send(message: Message, text: str) -> None:
+    """Fallback splitter for text that can't be split at paragraph boundaries.
+
+    Args:
+        message: The Telegram message object to reply to.
+        text: The text to send (may exceed MAX_MESSAGE_LENGTH).
+    """
+    remaining = text
+
+    while remaining:  # pragma: no branch
+        if len(remaining) <= MAX_MESSAGE_LENGTH:
+            await message.reply_text(remaining.strip())
+            break
+
+        # Try to find a good split point
+        split_point = MAX_MESSAGE_LENGTH
+
+        # Look for newline near the limit
+        newline_pos = remaining.rfind("\n", 0, MAX_MESSAGE_LENGTH)
+        if newline_pos > MAX_MESSAGE_LENGTH // 2:
+            split_point = newline_pos + 1
+        else:
+            # Look for space near the limit
+            space_pos = remaining.rfind(" ", 0, MAX_MESSAGE_LENGTH)
+            if space_pos > MAX_MESSAGE_LENGTH // 2:
+                split_point = space_pos + 1
+
+        chunk = remaining[:split_point].strip()
+        if chunk:
+            await message.reply_text(chunk)
+        remaining = remaining[split_point:]
+
+
+def create_application(token: str) -> Application:
+    """Create and configure the Telegram Application.
+
+    Args:
+        token: The Telegram bot token.
+
+    Returns:
+        Configured Application instance with handlers registered.
+    """
+    # Initialize the ADK runner with the root agent
+    initialize_runner(agent=root_agent, app_name="telegram-adk-bot")
+
+    # Create the Telegram Application
+    application = Application.builder().token(token).build()
+
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("clear", clear_command))
+
+    # Add message handler for text messages
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+    )
+
+    return application
+
+
+def run_bot(token: str | None) -> int:
+    """Run the Telegram bot and return exit code.
+
+    Args:
+        token: The Telegram bot token, or None if not configured.
+
+    Returns:
+        0 on success, 1 on error (missing token).
+    """
+    if not token:
+        logger.error("TELEGRAM_BOT_TOKEN environment variable is required")
+        return 1
+
+    application = create_application(token)
+
+    # Start the bot
+    logger.info("Starting Telegram bot...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    return 0
+
+
+def main() -> None:
+    """Run the Telegram bot."""
+    exit_code = run_bot(TELEGRAM_BOT_TOKEN)
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

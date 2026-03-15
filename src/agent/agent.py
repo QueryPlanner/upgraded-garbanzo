@@ -4,19 +4,28 @@ import logging
 import os
 from typing import Any
 
-from google.adk.agents import LlmAgent
-from google.adk.apps import App
-from google.adk.plugins.global_instruction_plugin import GlobalInstructionPlugin
-from google.adk.plugins.logging_plugin import LoggingPlugin
-from google.adk.tools.preload_memory_tool import PreloadMemoryTool
+# Load environment variables BEFORE any other imports
+# This ensures ROOT_AGENT_MODEL and API keys are available at module load time
+from dotenv import load_dotenv
 
-from .callbacks import LoggingCallbacks, add_session_to_memory
-from .prompt import (
+load_dotenv(override=True)
+
+from google.adk.agents import LlmAgent  # noqa: E402
+from google.adk.apps import App  # noqa: E402
+from google.adk.models import LiteLlm  # noqa: E402
+from google.adk.plugins.global_instruction_plugin import (  # noqa: E402
+    GlobalInstructionPlugin,
+)
+from google.adk.plugins.logging_plugin import LoggingPlugin  # noqa: E402
+from google.adk.tools.preload_memory_tool import PreloadMemoryTool  # noqa: E402
+
+from .callbacks import LoggingCallbacks, add_session_to_memory  # noqa: E402
+from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
     return_instruction_root,
 )
-from .tools import example_tool
+from .tools import example_tool  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +33,31 @@ logging_callbacks = LoggingCallbacks()
 
 # Determine model configuration
 model_name = os.getenv("ROOT_AGENT_MODEL", "gemini-2.5-flash")
-model: Any = model_name
 
-# Explicitly use LiteLlm for OpenRouter or other provider-prefixed models
-# that might not be auto-detected by ADK's registry.
-if model_name.lower().startswith("openrouter/") or "/" in model_name:
-    try:
-        from google.adk.models import LiteLlm
+# Build LiteLlm model configuration
+# LiteLlm is used for all models to support OpenRouter and other providers
+litellm_kwargs: dict[str, Any] = {"model": model_name}
 
-        logger.info(f"Using LiteLlm for model: {model_name}")
-        model = LiteLlm(model=model_name)
-    except ImportError:
-        logger.warning(
-            "LiteLlm not available, falling back to string model name. "
-            "OpenRouter models may not work."
+# Configure API key based on provider
+if model_name.lower().startswith("openrouter/"):
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if not openrouter_key:
+        raise ValueError(
+            "OPENROUTER_API_KEY environment variable is required for OpenRouter models"
         )
+    litellm_kwargs["api_key"] = openrouter_key
+    logger.info(f"Configuring OpenRouter model: {model_name}")
+elif model_name.lower().startswith("gemini") or model_name.lower().startswith("google"):
+    # For Google models, we can use either GOOGLE_API_KEY or the default
+    google_key = os.getenv("GOOGLE_API_KEY")
+    if google_key:
+        litellm_kwargs["api_key"] = google_key
+    logger.info(f"Configuring Google model via LiteLlm: {model_name}")
+
+# Create LiteLlm model
+logger.info(f"Creating LiteLlm with model: {model_name}")
+model = LiteLlm(**litellm_kwargs)
+logger.info("LiteLlm model created successfully")
 
 root_agent = LlmAgent(
     name="root_agent",

@@ -38,11 +38,53 @@
 | :--- | :--- | :--- |
 | **Run Locally** | `uv run python -m agent.server` | Starts the agent server on localhost:8080. |
 | **Run (Script)**| `uv run server` | Alternative command using the project script entry point. |
+| **Telegram Bot** | `uv run telegram-bot` | Starts the Telegram bot integration. |
 | **Docker Run** | `docker compose up --build -d` | Builds and starts the agent in a Docker container. |
 | **Test** | `uv run pytest` | Runs the test suite. |
 | **Lint** | `uv run ruff check` | Runs linter checks. |
 | **Format** | `uv run ruff format` | Formats code using Ruff. |
 | **Type Check** | `uv run mypy .` | Runs static type checking. |
+
+## Telegram Bot Integration
+
+This project includes a Telegram bot integration that allows users to interact with the ADK agent through Telegram.
+
+### Setup
+
+1. **Create a Telegram Bot:**
+   - Open Telegram and search for `@BotFather`
+   - Send `/newbot` and follow the prompts
+   - Save the bot token you receive (looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+2. **Configure Environment:**
+   ```bash
+   # Add to your .env file
+   TELEGRAM_BOT_TOKEN=your-telegram-bot-token-here
+   ```
+
+3. **Install Dependencies:**
+   ```bash
+   uv sync
+   ```
+
+### Running the Bot
+
+```bash
+uv run telegram-bot
+```
+
+### Available Commands
+
+| Command | Description |
+| :--- | :--- |
+| `/start` | Show welcome message |
+| `/help` | Display help information |
+| `/clear` | Clear conversation history and start fresh |
+
+### Architecture
+
+- `telegram_bot.py`: Main bot runner and message handlers
+- `telegram_handler.py`: ADK integration layer (session management, message processing)
 
 ## Development Conventions
 

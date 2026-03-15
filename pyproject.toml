@@ -23,10 +23,13 @@ dependencies = [
     "greenlet>=3.0.0",
     "langfuse>=3.12.0",
     "openinference-instrumentation-google-adk>=0.1.8",
+    # Telegram bot support
+    "python-telegram-bot>=22.0,<23.0",
 ]
 
 [project.scripts]
 server = "agent.server:main"
+telegram-bot = "agent.telegram_bot:main"
 
 [dependency-groups]
 dev = [
