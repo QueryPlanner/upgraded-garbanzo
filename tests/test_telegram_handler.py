@@ -392,9 +392,9 @@ class TestTelegramHandler:
         with (
             patch.object(
                 handler.runner.session_service,
-                "delete_session",
+                "create_session",
                 new_callable=AsyncMock,
-                side_effect=Exception("Delete failed"),
+                side_effect=Exception("Create failed"),
             ),
             patch("agent.telegram_handler.logger") as mock_logger,
         ):
@@ -402,6 +402,34 @@ class TestTelegramHandler:
 
             assert result is False
             mock_logger.exception.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reset_session_succeeds_when_delete_fails(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test that reset_session succeeds even if delete_session fails."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        with (
+            patch.object(
+                handler.runner.session_service,
+                "delete_session",
+                new_callable=AsyncMock,
+                side_effect=Exception("Session not found"),
+            ),
+            patch.object(
+                handler.runner.session_service,
+                "create_session",
+                new_callable=AsyncMock,
+            ) as mock_create,
+            patch("agent.telegram_handler.logger") as mock_logger,
+        ):
+            result = await handler.reset_session("user-1")
+
+            assert result is True
+            mock_create.assert_called_once()
+            # Should have logged a warning for the delete failure
+            mock_logger.warning.assert_called_once()
 
 
 class TestInitializeRunner:
@@ -500,6 +528,14 @@ class TestResetSessionFunction:
         """Test that function delegates to handler instance."""
         initialize_runner(mock_agent, app_name="test-app")
 
-        result = await reset_session("user-1")
+        with patch(
+            "agent.telegram_handler.TelegramHandler.reset_session",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_handler_reset:
+            result = await reset_session("user-1", session_id="custom-session")
 
-        assert result is True
+            assert result is True
+            mock_handler_reset.assert_called_once_with(
+                user_id="user-1", session_id="custom-session"
+            )

@@ -152,8 +152,17 @@ class TelegramHandler:
                 f"Deleted existing session for user={user_id}, "
                 f"session={effective_session_id}"
             )
+        except Exception:
+            # This is not critical, as the session might not have existed.
+            # We log it as a warning and proceed to creation.
+            logger.warning(
+                f"Could not delete session for user={user_id}, "
+                f"session={effective_session_id}. "
+                "It might not have existed. Proceeding with session creation."
+            )
 
-            # Create a fresh session
+        try:
+            # The crucial part is creating a new session.
             await self.runner.session_service.create_session(
                 app_name=self.app_name,
                 user_id=user_id,
@@ -166,7 +175,7 @@ class TelegramHandler:
             return True
         except Exception:
             logger.exception(
-                f"Failed to reset session for user={user_id}, "
+                f"Failed to create new session for user={user_id}, "
                 f"session={effective_session_id}"
             )
             return False

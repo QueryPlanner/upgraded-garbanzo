@@ -202,10 +202,12 @@ class TestResetCommand:
         update.message = None
         update.effective_user = MagicMock()
 
-        with patch("agent.telegram_bot.reset_session", new_callable=AsyncMock):
+        with patch(
+            "agent.telegram_bot.reset_session", new_callable=AsyncMock
+        ) as mock_reset:
             await reset_command(update, mock_context)
 
-            assert True
+            mock_reset.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_returns_early_when_no_user(self, mock_context: MagicMock) -> None:
@@ -214,9 +216,13 @@ class TestResetCommand:
         update.message = MagicMock()
         update.effective_user = None
 
-        await reset_command(update, mock_context)
+        with patch(
+            "agent.telegram_bot.reset_session", new_callable=AsyncMock
+        ) as mock_reset:
+            await reset_command(update, mock_context)
 
-        assert True
+            mock_reset.assert_not_called()
+            update.message.reply_text.assert_not_called()
 
 
 class TestHandleMessage:
