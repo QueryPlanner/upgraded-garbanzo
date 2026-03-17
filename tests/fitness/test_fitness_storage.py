@@ -3,7 +3,7 @@
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, create_autospec, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,7 +15,7 @@ from agent.fitness import (
     WorkoutEntry,
     get_fitness_storage,
 )
-from agent.fitness.storage import DEFAULT_DB_PATH
+from agent.fitness.storage import _get_default_db_path
 
 
 @pytest.fixture
@@ -69,9 +69,10 @@ class TestFitnessStorageInit:
     """Tests for FitnessStorage initialization."""
 
     def test_init_default_path(self) -> None:
-        """Test default database path."""
+        """Test default database path uses data directory."""
         storage = FitnessStorage()
-        assert storage.db_path == DEFAULT_DB_PATH
+        assert storage.db_path == _get_default_db_path()
+        assert storage.db_path.name == "fitness.db"
 
     def test_init_custom_path(self, temp_db_path: Path) -> None:
         """Test custom database path."""
@@ -170,9 +171,7 @@ class TestCalorieOperations:
         assert entries == []
 
     @pytest.mark.asyncio
-    async def test_get_calorie_stats(
-        self, storage: FitnessStorage
-    ) -> None:
+    async def test_get_calorie_stats(self, storage: FitnessStorage) -> None:
         """Test getting calorie statistics."""
         # Add multiple entries
         for i in range(3):
@@ -220,9 +219,7 @@ class TestWorkoutOperations:
         assert entries[0].weight == 80.0
 
     @pytest.mark.asyncio
-    async def test_get_workout_entries_by_type(
-        self, storage: FitnessStorage
-    ) -> None:
+    async def test_get_workout_entries_by_type(self, storage: FitnessStorage) -> None:
         """Test filtering workouts by type."""
         entry1 = WorkoutEntry(
             user_id="test_user",
@@ -256,9 +253,7 @@ class TestWorkoutOperations:
         assert cardio_entries[0].exercise_name == "Running"
 
     @pytest.mark.asyncio
-    async def test_get_workout_stats(
-        self, storage: FitnessStorage
-    ) -> None:
+    async def test_get_workout_stats(self, storage: FitnessStorage) -> None:
         """Test getting workout statistics."""
         entry = WorkoutEntry(
             user_id="test_user",
@@ -344,17 +339,13 @@ class TestGetFitnessStorage:
 
     def test_get_fitness_storage_returns_instance(self) -> None:
         """Test that get_fitness_storage returns a FitnessStorage instance."""
-        with patch(
-            "agent.fitness.storage._storage", None
-        ):
+        with patch("agent.fitness.storage._storage", None):
             storage = get_fitness_storage()
             assert isinstance(storage, FitnessStorage)
 
     def test_get_fitness_storage_returns_same_instance(self) -> None:
         """Test that get_fitness_storage returns the same instance."""
-        with patch(
-            "agent.fitness.storage._storage", None
-        ):
+        with patch("agent.fitness.storage._storage", None):
             storage1 = get_fitness_storage()
             storage2 = get_fitness_storage()
             assert storage1 is storage2

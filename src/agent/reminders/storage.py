@@ -13,10 +13,14 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from ..utils.config import get_data_dir
+
 logger = logging.getLogger(__name__)
 
-# Default database path in user's data directory
-DEFAULT_DB_PATH = Path.home() / ".adk_agent" / "reminders.db"
+
+def _get_default_db_path() -> Path:
+    """Get the default database path in the agent data directory."""
+    return get_data_dir() / "reminders.db"
 
 
 class Reminder(BaseModel):
@@ -54,9 +58,9 @@ class ReminderStorage:
 
         Args:
             db_path: Optional path to SQLite database file.
-                Defaults to ~/.adk_agent/reminders.db
+                Defaults to <agent_data_dir>/reminders.db
         """
-        self.db_path = db_path or DEFAULT_DB_PATH
+        self.db_path = db_path or _get_default_db_path()
         self._lock = asyncio.Lock()
         self._initialized = False
 
