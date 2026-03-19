@@ -14,6 +14,7 @@ Usage:
     - Use /help to see available commands
 """
 
+import contextlib
 import logging
 import os
 import sys
@@ -23,7 +24,7 @@ from dotenv import load_dotenv
 from telegram import BotCommand, Update
 from telegram._message import Message
 from telegram.constants import ParseMode
-from telegram.error import TelegramError
+from telegram.error import NetworkError, TelegramError, TimedOut
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -164,11 +165,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info(f"Message from {user_id}: {user_message[:50]}...")
 
-    # Send typing indicator
-    await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id,
-        action="typing",
-    )
+    # Send typing indicator (best effort - don't fail if this times out)
+    try:
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action="typing",
+        )
+    except (TimedOut, NetworkError):
+        logger.warning(f"Failed to send typing indicator for user {user_id}")
 
     try:
         # Process message through ADK agent
@@ -176,6 +180,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_id=user_id,
             message=user_message,
         )
+
+        # Handle empty responses
+        if not response or not response.strip():
+            logger.warning(f"Agent returned empty response for user {user_id}")
+            await update.message.reply_text(
+                "🤔 I'm not sure how to respond to that. Could you rephrase?"
+            )
+            return
 
         # Split long messages if needed (Telegram has 4096 char limit)
         if len(response) <= MAX_MESSAGE_LENGTH:
@@ -197,6 +209,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "❌ Sorry, an error occurred while processing your message. "
             "Please try again later."
         )
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Global error handler for unhandled exceptions."""
+    error = context.error
+
+    if isinstance(error, TimedOut):
+        logger.warning("Telegram API timeout - network may be slow")
+        if isinstance(update, Update) and update.message:
+            with contextlib.suppress(Exception):
+                await update.message.reply_text(
+                    "⏳ The request timed out. Please try again."
+                )
+    elif isinstance(error, NetworkError):
+        logger.error(f"Network error: {error}")
+    else:
+        logger.exception(f"Unhandled error: {error}")
 
 
 async def _send_long_message(message: Message, text: str) -> None:
@@ -296,6 +325,9 @@ def create_application(token: str) -> Application:
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
+
+    # Add global error handler
+    application.add_error_handler(error_handler)
 
     return application
 

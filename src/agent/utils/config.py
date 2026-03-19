@@ -5,8 +5,11 @@ and configuration management.
 """
 
 import json
+import logging
 import os
+import shutil
 import sys
+from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -16,6 +19,90 @@ from pydantic import (
     Field,
     ValidationError,
 )
+
+logger = logging.getLogger(__name__)
+
+# Default data directory relative to project root (src/agent/data)
+DEFAULT_DATA_DIR = Path(__file__).parent.parent / "data"
+
+# Legacy data directory in user's home (for migration)
+LEGACY_DATA_DIR = Path.home() / ".adk_agent"
+
+
+def get_data_dir() -> Path:
+    """Get the data directory path for agent storage.
+
+    Resolves the data directory in the following order:
+    1. AGENT_DATA_DIR environment variable (if set)
+    2. Default to src/agent/data within the project
+
+    Also handles migration from legacy ~/.adk_agent/ directory on first run.
+
+    Returns:
+        Path to the data directory (guaranteed to exist).
+    """
+    # Check for environment variable override
+    env_dir = os.getenv("AGENT_DATA_DIR")
+    if env_dir:
+        data_dir = Path(env_dir).expanduser().resolve()
+    else:
+        data_dir = DEFAULT_DATA_DIR.resolve()
+
+    # Create directory if it doesn't exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Migrate from legacy directory if it exists and new directory is empty
+    _migrate_from_legacy(data_dir)
+
+    return data_dir
+
+
+def _migrate_from_legacy(data_dir: Path) -> None:
+    """Migrate data from legacy ~/.adk_agent/ to new data directory.
+
+    Only migrates if:
+    - Legacy directory exists
+    - New directory was just created (empty or minimal)
+    - Migration hasn't happened before (no .migrated marker)
+
+    Moves (not copies) database files to prevent data duplication.
+
+    Args:
+        data_dir: The new data directory path.
+    """
+    migration_marker = data_dir / ".migrated"
+
+    # Skip if already migrated or legacy doesn't exist
+    if migration_marker.exists() or not LEGACY_DATA_DIR.exists():
+        return
+
+    # Check if there are db files to migrate
+    legacy_db_files = list(LEGACY_DATA_DIR.glob("*.db"))
+    if not legacy_db_files:
+        # No files to migrate, just mark as done
+        migration_marker.touch()
+        return
+
+    # Check if new directory has any db files (skip if user has data there)
+    existing_db_files = list(data_dir.glob("*.db"))
+    if existing_db_files:
+        logger.info(
+            f"Data directory {data_dir} already contains database files, "
+            "skipping migration from legacy location"
+        )
+        migration_marker.touch()
+        return
+
+    # Perform migration (MOVE files, not copy)
+    logger.info(f"Migrating data from {LEGACY_DATA_DIR} to {data_dir}")
+    for legacy_file in legacy_db_files:
+        dest_file = data_dir / legacy_file.name
+        shutil.move(str(legacy_file), str(dest_file))
+        logger.info(f"Moved {legacy_file.name} to {dest_file}")
+
+    # Mark migration complete
+    migration_marker.touch()
+    logger.info("Migration complete. Legacy directory preserved at %s", LEGACY_DATA_DIR)
 
 
 def initialize_environment[T: BaseModel](
