@@ -229,10 +229,10 @@ async def notify_tool_call(
     args: dict[str, Any],
     tool_context: ToolContext,
 ) -> None:
-    """Send Telegram notification when a tool is called.
+    """Log tool invocation and send Telegram notification.
 
-    This async callback notifies users in real-time when the agent
-    invokes a tool, providing better observability into agent actions.
+    This async callback provides logging for tool calls and notifies users
+    in real-time when the agent invokes a tool.
 
     Args:
         tool: The tool being invoked.
@@ -242,10 +242,32 @@ async def notify_tool_call(
     """
     from .telegram.notifications import get_notification_service
 
+    # Log tool invocation (same as LoggingCallbacks.before_tool)
+    logger.info(
+        f"*** Before invoking tool '{tool.name}' in agent "
+        f"'{tool_context.agent_name}' with invocation_id "
+        f"'{tool_context.invocation_id}' ***"
+    )
+    logger.debug(f"State keys: {tool_context.state.to_dict().keys()}")
+
+    if content := tool_context.user_content:
+        logger.debug(
+            f"User Content: {content.model_dump(exclude_none=True, mode='json')}"
+        )
+
+    actions_data = tool_context.actions.model_dump(exclude_none=True, mode="json")
+    logger.debug(f"EventActions: {actions_data}")
+    logger.debug(f"args: {args}")
+
     # Get user_id from session state (set by TelegramHandler)
     user_id = tool_context.state.get("user_id")
     if not user_id:
-        logger.debug("No user_id in session state, skipping tool notification")
+        # Log at INFO level to catch this issue in production
+        logger.info(
+            f"No user_id in session state for tool '{tool.name}', "
+            f"session keys: {list(tool_context.state.to_dict().keys())}, "
+            "skipping tool notification"
+        )
         return None
 
     try:
