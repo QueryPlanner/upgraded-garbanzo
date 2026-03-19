@@ -68,6 +68,23 @@ if model_name.lower().startswith("openrouter/"):
     litellm_kwargs["api_key"] = openrouter_key
     logger.info(f"Configuring OpenRouter model: {model_name}")
 
+    # Provider enforcement for OpenRouter models
+    # OpenRouter can serve some models through multiple providers with varying
+    # quality/cost. Use OPENROUTER_PROVIDER_ORDER env var to specify preference.
+    # Example: OPENROUTER_PROVIDER_ORDER='["google-vertex", "together"]'
+    # See: https://openrouter.ai/docs/provider-routing
+    provider_order = os.getenv("OPENROUTER_PROVIDER_ORDER")
+    if provider_order:
+        import json
+
+        try:
+            litellm_kwargs["extra_body"] = {
+                "provider": {"order": json.loads(provider_order)}
+            }
+            logger.info(f"OpenRouter provider order: {provider_order}")
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid OPENROUTER_PROVIDER_ORDER JSON: {provider_order}")
+
 elif model_name.lower().startswith("gemini") or model_name.lower().startswith("google"):
     # For Google models, we can use either GOOGLE_API_KEY or the default
     google_key = os.getenv("GOOGLE_API_KEY")
