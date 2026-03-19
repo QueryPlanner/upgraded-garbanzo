@@ -44,6 +44,7 @@ from .handler import (  # noqa: E402
     process_message,
     reset_session,
 )
+from .markdown_converter import convert_markdown_to_telegram  # noqa: E402
 from .notifications import get_notification_service  # noqa: E402
 
 # Configure logging
@@ -191,12 +192,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
+        # Convert markdown to Telegram MARKDOWN_V2 format
+        telegram_response = convert_markdown_to_telegram(response)
+
         # Split long messages if needed (Telegram has 4096 char limit)
-        if len(response) <= MAX_MESSAGE_LENGTH:
-            await update.message.reply_text(response)
+        if len(telegram_response) <= MAX_MESSAGE_LENGTH:
+            await update.message.reply_text(
+                telegram_response, parse_mode=ParseMode.MARKDOWN_V2
+            )
         else:
             # Split into chunks at natural boundaries when possible
-            await _send_long_message(update.message, response)
+            await _send_long_message(update.message, telegram_response)
 
     except TelegramError as e:
         logger.error(f"Telegram API error for user {user_id}: {e}")
@@ -238,7 +244,7 @@ async def _send_long_message(message: Message, text: str) -> None:
 
     Args:
         message: The Telegram message object to reply to.
-        text: The text to send.
+        text: The text to send (already converted to Telegram format).
     """
     # Try to split at paragraph breaks first (double newlines)
     paragraphs = text.split("\n\n")
@@ -251,7 +257,9 @@ async def _send_long_message(message: Message, text: str) -> None:
             and len(current_chunk) + 2 + len(paragraph) > MAX_MESSAGE_LENGTH
         ):
             # Send current chunk
-            await message.reply_text(current_chunk.strip())
+            await message.reply_text(
+                current_chunk.strip(), parse_mode=ParseMode.MARKDOWN_V2
+            )
             current_chunk = paragraph
         elif current_chunk:
             current_chunk += "\n\n" + paragraph
@@ -261,7 +269,9 @@ async def _send_long_message(message: Message, text: str) -> None:
     # Send remaining content
     if current_chunk:
         if len(current_chunk) <= MAX_MESSAGE_LENGTH:
-            await message.reply_text(current_chunk.strip())
+            await message.reply_text(
+                current_chunk.strip(), parse_mode=ParseMode.MARKDOWN_V2
+            )
         else:
             # Fallback: split at single newlines or character boundaries
             await _split_and_send(message, current_chunk)
@@ -272,13 +282,15 @@ async def _split_and_send(message: Message, text: str) -> None:
 
     Args:
         message: The Telegram message object to reply to.
-        text: The text to send (may exceed MAX_MESSAGE_LENGTH).
+        text: Text to send (may exceed limit, already in Telegram format).
     """
     remaining = text
 
     while remaining:  # pragma: no branch
         if len(remaining) <= MAX_MESSAGE_LENGTH:
-            await message.reply_text(remaining.strip())
+            await message.reply_text(
+                remaining.strip(), parse_mode=ParseMode.MARKDOWN_V2
+            )
             break
 
         # Try to find a good split point
@@ -296,7 +308,7 @@ async def _split_and_send(message: Message, text: str) -> None:
 
         chunk = remaining[:split_point].strip()
         if chunk:
-            await message.reply_text(chunk)
+            await message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
         remaining = remaining[split_point:]
 
 
