@@ -57,10 +57,14 @@ This project includes a Telegram bot integration that allows users to interact w
    - Save the bot token you receive (looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
 
 2. **Configure Environment:**
-   ```bash
-   # Add to your .env file
-   TELEGRAM_BOT_TOKEN=your-telegram-bot-token-here
-   ```
+ ```bash
+ # Add to your .env file
+ TELEGRAM_BOT_TOKEN=your-telegram-bot-token-here
+
+ # Optional: Set DATABASE_URL for persistent sessions (same as server)
+ # When set, conversation history survives bot restarts
+ DATABASE_URL=postgresql://user:pass@host:port/dbname?ssl=require
+ ```
 
 3. **Install Dependencies:**
    ```bash
@@ -83,8 +87,12 @@ uv run telegram-bot
 
 ### Architecture
 
-- `telegram_bot.py`: Main bot runner and message handlers
-- `telegram_handler.py`: ADK integration layer (session management, message processing)
+- `telegram/bot.py`: Main bot runner and message handlers
+- `telegram/handler.py`: ADK integration layer (session management, message processing)
+
+### Session Persistence
+
+The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set in `.env`, sessions are persisted in Postgres and survive restarts. Without it, sessions are in-memory only.
 
 ## Development Conventions
 

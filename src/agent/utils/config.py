@@ -153,50 +153,14 @@ def initialize_environment[T: BaseModel](
     return env
 
 
-class ServerEnv(BaseModel):
-    """Environment configuration for local server development and deployment.
-
-    Provides configuration for both local development and Cloud Run deployment,
-    with sensible defaults for local development.
+class SessionConfig(BaseModel):
+    """Session storage configuration shared between server and Telegram bot.
 
     Attributes:
-        google_cloud_project: GCP project ID for authentication and observability.
-        google_cloud_location: Vertex AI region (e.g., us-central1).
-        agent_name: Unique agent identifier for resources and logs.
-        log_level: Logging verbosity level.
-        serve_web_interface: Whether to serve the ADK web interface.
-        reload_agents: Whether to reload agents on file changes (local dev only).
-        agent_engine: Agent Engine instance ID for session and memory persistence.
-        artifact_service_uri: GCS bucket URI for artifact storage.
-        allow_origins: JSON array string of allowed CORS origins.
-        host: Server host (127.0.0.1 for local, 0.0.0.0 for containers).
-        port: Server port.
-        otel_capture_content: OpenTelemetry message content capture setting.
+        agent_engine: Agent Engine instance ID for session persistence.
+        database_url: Database URL for session storage.
+        db_pool_*: Database connection pool settings.
     """
-
-    agent_name: str = Field(
-        ...,
-        alias="AGENT_NAME",
-        description="Unique agent identifier for resources and logs",
-    )
-
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO",
-        alias="LOG_LEVEL",
-        description="Logging verbosity level",
-    )
-
-    serve_web_interface: bool = Field(
-        default=False,
-        alias="SERVE_WEB_INTERFACE",
-        description="Whether to serve the ADK web interface",
-    )
-
-    reload_agents: bool = Field(
-        default=False,
-        alias="RELOAD_AGENTS",
-        description="Whether to reload agents on file changes (local dev only)",
-    )
 
     agent_engine: str | None = Field(
         default=None,
@@ -240,6 +204,102 @@ class ServerEnv(BaseModel):
         description="Seconds to wait before giving up on getting a connection",
     )
 
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="ignore",
+    )
+
+    @property
+    def agent_engine_uri(self) -> str | None:
+        """Agent Engine URI with protocol prefix."""
+        return f"agentengine://{self.agent_engine}" if self.agent_engine else None
+
+    @property
+    def session_uri(self) -> str | None:
+        """Session service URI (Database or Agent Engine)."""
+        if self.database_url:
+            # asyncpg requires 'ssl=require' instead of 'sslmode=require'
+            # Also removing channel_binding as it causes TypeError with current
+            # sqlalchemy/asyncpg setup
+            return self.database_url.replace("sslmode=require", "ssl=require").replace(
+                "&channel_binding=require", ""
+            )
+        return self.agent_engine_uri
+
+    @property
+    def session_db_kwargs(self) -> dict[str, int | bool]:
+        """Database connection pool settings for session service.
+
+        Returns:
+            Dictionary with pool configuration for SQLAlchemy async engine.
+        """
+        return {
+            "pool_pre_ping": self.db_pool_pre_ping,
+            "pool_recycle": self.db_pool_recycle,
+            "pool_size": self.db_pool_size,
+            "max_overflow": self.db_max_overflow,
+            "pool_timeout": self.db_pool_timeout,
+        }
+
+    @property
+    def asyncpg_session_uri(self) -> str | None:
+        """Session service URI formatted for asyncpg.
+
+        Same as session_uri but with postgresql:// replaced with
+        postgresql+asyncpg:// for use with SQLAlchemy async engine.
+
+        Returns:
+            Database URL formatted for asyncpg, or Agent Engine URI.
+        """
+        uri = self.session_uri
+        if uri and uri.startswith("postgresql://"):
+            return uri.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return uri
+
+
+class ServerEnv(SessionConfig):
+    """Environment configuration for local server development and deployment.
+
+    Provides configuration for both local development and Cloud Run deployment,
+    with sensible defaults for local development.
+
+    Inherits session configuration from SessionConfig.
+
+    Attributes:
+        agent_name: Unique agent identifier for resources and logs.
+        log_level: Logging verbosity level.
+        serve_web_interface: Whether to serve the ADK web interface.
+        reload_agents: Whether to reload agents on file changes (local dev only).
+        openrouter_api_key: OpenRouter API key for LiteLLM integration.
+        allow_origins: JSON array string of allowed CORS origins.
+        host: Server host (127.0.0.1 for local, 0.0.0.0 for containers).
+        port: Server port.
+    """
+
+    agent_name: str = Field(
+        ...,
+        alias="AGENT_NAME",
+        description="Unique agent identifier for resources and logs",
+    )
+
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO",
+        alias="LOG_LEVEL",
+        description="Logging verbosity level",
+    )
+
+    serve_web_interface: bool = Field(
+        default=False,
+        alias="SERVE_WEB_INTERFACE",
+        description="Whether to serve the ADK web interface",
+    )
+
+    reload_agents: bool = Field(
+        default=False,
+        alias="RELOAD_AGENTS",
+        description="Whether to reload agents on file changes (local dev only)",
+    )
+
     openrouter_api_key: str | None = Field(
         default=None,
         alias="OPENROUTER_API_KEY",
@@ -264,11 +324,6 @@ class ServerEnv(BaseModel):
         description="Server port",
     )
 
-    model_config = ConfigDict(
-        populate_by_name=True,  # Allow both field names and aliases
-        extra="ignore",  # Ignore extra env vars (system vars, etc.)
-    )
-
     def print_config(self) -> None:
         """Print server configuration for user verification."""
         print("\n\n✅ Environment variables loaded for server:\n")
@@ -289,23 +344,6 @@ class ServerEnv(BaseModel):
         print(f"HOST:                  {self.host}")
         print(f"PORT:                  {self.port}")
         print(f"ALLOW_ORIGINS:         {self.allow_origins}\n\n")
-
-    @property
-    def agent_engine_uri(self) -> str | None:
-        """Agent Engine URI with protocol prefix."""
-        return f"agentengine://{self.agent_engine}" if self.agent_engine else None
-
-    @property
-    def session_uri(self) -> str | None:
-        """Session service URI (Database or Agent Engine)."""
-        if self.database_url:
-            # asyncpg requires 'ssl=require' instead of 'sslmode=require'
-            # Also removing channel_binding as it causes TypeError with current
-            # sqlalchemy/asyncpg setup
-            return self.database_url.replace("sslmode=require", "ssl=require").replace(
-                "&channel_binding=require", ""
-            )
-        return self.agent_engine_uri
 
     @property
     def allow_origins_list(self) -> list[str]:
