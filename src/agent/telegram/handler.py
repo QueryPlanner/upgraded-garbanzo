@@ -6,13 +6,18 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 
 import logging
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from google.adk.agents import LlmAgent
+from google.adk.apps import App
 from google.adk.artifacts.in_memory_artifact_service import InMemoryArtifactService
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.adk.runners import InMemoryRunner, Runner
 from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai import types
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -43,39 +48,73 @@ class TelegramHandler:
 
     def __init__(
         self,
-        agent: LlmAgent,
+        agent: LlmAgent | None = None,
+        app: App | None = None,
         app_name: str = "telegram-bot",
         session_service: BaseSessionService | None = None,
     ) -> None:
-        """Initialize the TelegramHandler with an ADK agent.
+        """Initialize the TelegramHandler with an ADK agent or App.
 
         Args:
-            agent: The LlmAgent to use for processing messages.
+            agent: The LlmAgent to use for processing messages. Use either
+                this or 'app', not both.
+            app: An App instance with pre-configured plugins (like
+                GlobalInstructionPlugin for current time). If provided, this
+                takes precedence over agent parameter.
             app_name: Application name for session management.
             session_service: Optional session service for persistence. When
                 provided (e.g., Postgres via DATABASE_URL), sessions survive
                 restarts. When None, uses InMemoryRunner (sessions lost on restart).
         """
-        self.agent = agent
-        self.app_name = app_name
+        if app is not None:
+            # Use the App's plugins (like GlobalInstructionPlugin for current time)
+            self.agent = app.root_agent
+            self.app_name = app.name
 
-        if session_service is not None:
-            self.runner = Runner(
-                agent=agent,
-                app_name=app_name,
-                session_service=session_service,
-                artifact_service=InMemoryArtifactService(),
-                memory_service=InMemoryMemoryService(),
-            )
-            logger.info(
-                f"ADK Runner initialized with app_name={app_name} "
-                "(database-backed sessions)"
-            )
+            # Create runner with the app and its plugins
+            if session_service is not None:
+                self.runner = Runner(
+                    app=app,
+                    session_service=session_service,
+                    artifact_service=InMemoryArtifactService(),
+                    memory_service=InMemoryMemoryService(),
+                )
+                logger.info(
+                    f"TelegramHandler initialized from App with plugins "
+                    f"(app_name={self.app_name}, database-backed sessions)"
+                )
+            else:
+                self.runner = InMemoryRunner(
+                    app=app,
+                )
+                logger.info(
+                    f"TelegramHandler initialized from App with plugins "
+                    f"(app_name={self.app_name}, in-memory sessions)"
+                )
+        elif agent is not None:
+            self.agent = agent
+            self.app_name = app_name
+
+            if session_service is not None:
+                self.runner = Runner(
+                    agent=agent,
+                    app_name=app_name,
+                    session_service=session_service,
+                    artifact_service=InMemoryArtifactService(),
+                    memory_service=InMemoryMemoryService(),
+                )
+                logger.info(
+                    f"ADK Runner initialized with app_name={app_name} "
+                    "(database-backed sessions)"
+                )
+            else:
+                self.runner = InMemoryRunner(agent=agent, app_name=app_name)
+                logger.info(
+                    f"ADK Runner initialized with app_name={app_name} "
+                    "(in-memory sessions)"
+                )
         else:
-            self.runner = InMemoryRunner(agent=agent, app_name=app_name)
-            logger.info(
-                f"ADK Runner initialized with app_name={app_name} (in-memory sessions)"
-            )
+            raise ValueError("Either 'agent' or 'app' must be provided")
 
     async def process_message(
         self,
@@ -252,17 +291,22 @@ _handler: TelegramHandler | None = None
 
 
 def initialize_runner(
-    agent: LlmAgent,
+    agent: LlmAgent | None = None,
+    app: App | None = None,
     app_name: str = "telegram-bot",
     session_service: BaseSessionService | None = None,
 ) -> Runner:
-    """Initialize the ADK runner with the given agent.
+    """Initialize the ADK runner with the given agent or app.
 
     This function is maintained for backwards compatibility.
     Consider using the TelegramHandler class directly for new code.
 
     Args:
-        agent: The LlmAgent to use for processing messages.
+        agent: The LlmAgent to use for processing messages. Use either
+            this or 'app', not both.
+        app: An App instance with pre-configured plugins (like
+            GlobalInstructionPlugin for current time). If provided, this
+            takes precedence over agent parameter.
         app_name: Application name for session management.
         session_service: Optional session service. When provided (e.g., from
             DATABASE_URL), sessions persist across restarts.
@@ -274,6 +318,7 @@ def initialize_runner(
     global _handler
     _handler = TelegramHandler(
         agent=agent,
+        app=app,
         app_name=app_name,
         session_service=session_service,
     )

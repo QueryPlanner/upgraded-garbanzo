@@ -30,6 +30,8 @@ from .prompt import (  # noqa: E402
     return_instruction_root,
 )
 from .skills.loader import create_skill_toolset  # noqa: E402
+
+__all__ = ["root_agent", "app"]
 from .tools import (  # noqa: E402
     add_calories,
     cancel_reminder,
@@ -104,7 +106,7 @@ skill_toolset = create_skill_toolset()
 logger.info("Skill toolset created")
 
 root_agent = LlmAgent(
-    name="root_agent",
+    name="garbanzo",
     description=return_description_root(),
     before_agent_callback=logging_callbacks.before_agent,
     after_agent_callback=[logging_callbacks.after_agent, add_session_to_memory],
