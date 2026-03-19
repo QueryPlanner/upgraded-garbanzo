@@ -2,6 +2,8 @@
 
 A **production-ready template** for building and deploying Google ADK agents on your own infrastructure (bare metal, VPS, or private cloud) without the complexity or lock-in of heavy cloud providers.
 
+> **Note:** This project uses a context system for agent identity and bootstrapping. See `.context/` directory for details.
+
 **Philosophy**
 We believe you should own your agents. This template is designed to strip away the "cloud magic" and give you a clean, performant, and observable foundation that runs anywhere—from a $5/mo VPS to a Raspberry Pi cluster.
 
