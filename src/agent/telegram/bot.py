@@ -43,6 +43,7 @@ from .handler import (  # noqa: E402
     process_message,
     reset_session,
 )
+from .notifications import get_notification_service  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -337,7 +338,7 @@ async def _set_bot_commands(application: Application) -> None:
 
     This registers the available commands with Telegram so users see
     a popup menu when they type '/' in the chat. Also initializes the
-    reminder scheduler with the bot instance.
+    reminder scheduler and notification service with the bot instance.
 
     Args:
         application: The Telegram Application instance.
@@ -356,6 +357,11 @@ async def _set_bot_commands(application: Application) -> None:
     scheduler.set_bot(application.bot)
     await scheduler.start()
     logger.info("Reminder scheduler started")
+
+    # Initialize the tool notification service
+    notification_service = get_notification_service()
+    notification_service.set_bot(application.bot)
+    logger.info("Tool notification service initialized")
 
 
 def run_bot(token: str | None) -> int:

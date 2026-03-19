@@ -2,12 +2,15 @@
 
 import logging
 from typing import cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from conftest import MockMemoryCallbackContext
+from conftest import MockMemoryCallbackContext, MockState, MockToolContext
 from google.adk.agents.callback_context import CallbackContext
+from google.adk.tools import ToolContext
+from google.adk.tools.base_tool import BaseTool
 
-from agent.callbacks import add_session_to_memory
+from agent.callbacks import add_session_to_memory, notify_tool_call
 
 
 def as_callback_context(context: MockMemoryCallbackContext) -> CallbackContext:
@@ -171,3 +174,143 @@ class TestAddSessionToMemory:
         # Verify both were logged
         info_records = [r for r in caplog.records if r.levelname == "INFO"]
         assert len(info_records) == 2
+
+
+def as_tool_context(context: MockToolContext) -> ToolContext:
+    """Treat mock tool contexts as real ToolContext objects for typing."""
+    return cast(ToolContext, context)
+
+
+def make_mock_tool(name: str = "test_tool") -> BaseTool:
+    """Create a mock BaseTool with the given name."""
+    mock_tool = MagicMock(spec=BaseTool)
+    mock_tool.name = name
+    return cast(BaseTool, mock_tool)
+
+
+class TestNotifyToolCall:
+    """Tests for the notify_tool_call callback function."""
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_sends_notification(self) -> None:
+        """Test that notification is sent when user_id is in state."""
+        mock_tool = make_mock_tool(name="schedule_reminder")
+        mock_state = MockState({"user_id": "123456"})
+        mock_context = MockToolContext(state=mock_state)
+
+        mock_service = MagicMock()
+        mock_service.notify_tool_call = AsyncMock()
+
+        with patch(
+            "agent.telegram.notifications.get_notification_service",
+            return_value=mock_service,
+        ):
+            await notify_tool_call(
+                tool=mock_tool,
+                args={"message": "test", "time": "2024-01-01"},
+                tool_context=as_tool_context(mock_context),
+            )
+
+        mock_service.notify_tool_call.assert_called_once_with(
+            chat_id="123456",
+            tool_name="schedule_reminder",
+            args={"message": "test", "time": "2024-01-01"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_skips_when_no_user_id(self) -> None:
+        """Test that notification is skipped when user_id is not in state."""
+        mock_tool = make_mock_tool(name="test_tool")
+        mock_state = MockState({})  # Empty state, no user_id
+        mock_context = MockToolContext(state=mock_state)
+
+        mock_service = MagicMock()
+        mock_service.notify_tool_call = AsyncMock()
+
+        with patch(
+            "agent.telegram.notifications.get_notification_service",
+            return_value=mock_service,
+        ):
+            await notify_tool_call(
+                tool=mock_tool,
+                args={"key": "value"},
+                tool_context=as_tool_context(mock_context),
+            )
+
+        mock_service.notify_tool_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_handles_exception(self) -> None:
+        """Test that exceptions are caught and logged."""
+        mock_tool = make_mock_tool(name="test_tool")
+        mock_state = MockState({"user_id": "123456"})
+        mock_context = MockToolContext(state=mock_state)
+
+        mock_service = MagicMock()
+        mock_service.notify_tool_call = AsyncMock(
+            side_effect=Exception("Telegram error")
+        )
+
+        with patch(
+            "agent.telegram.notifications.get_notification_service",
+            return_value=mock_service,
+        ):
+            # Should not raise
+            await notify_tool_call(
+                tool=mock_tool,
+                args={},
+                tool_context=as_tool_context(mock_context),
+            )
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_with_empty_args(self) -> None:
+        """Test notification with empty args dict (converted to None)."""
+        mock_tool = make_mock_tool(name="list_reminders")
+        mock_state = MockState({"user_id": "123456"})
+        mock_context = MockToolContext(state=mock_state)
+
+        mock_service = MagicMock()
+        mock_service.notify_tool_call = AsyncMock()
+
+        with patch(
+            "agent.telegram.notifications.get_notification_service",
+            return_value=mock_service,
+        ):
+            await notify_tool_call(
+                tool=mock_tool,
+                args={},
+                tool_context=as_tool_context(mock_context),
+            )
+
+        # Empty dict is falsy, so it gets converted to None
+        mock_service.notify_tool_call.assert_called_once_with(
+            chat_id="123456",
+            tool_name="list_reminders",
+            args=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_with_non_empty_args(self) -> None:
+        """Test notification with args."""
+        mock_tool = make_mock_tool(name="get_stats")
+        mock_state = MockState({"user_id": "123456"})
+        mock_context = MockToolContext(state=mock_state)
+
+        mock_service = MagicMock()
+        mock_service.notify_tool_call = AsyncMock()
+
+        with patch(
+            "agent.telegram.notifications.get_notification_service",
+            return_value=mock_service,
+        ):
+            await notify_tool_call(
+                tool=mock_tool,
+                args={"count": 10},
+                tool_context=as_tool_context(mock_context),
+            )
+
+        mock_service.notify_tool_call.assert_called_once_with(
+            chat_id="123456",
+            tool_name="get_stats",
+            args={"count": 10},
+        )

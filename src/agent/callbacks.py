@@ -1,8 +1,8 @@
 """Agent lifecycle callback functions for monitoring and memory.
 
 This module provides callback functions that execute at various stages of the
-agent lifecycle. These callbacks enable comprehensive logging and session
-memory persistence.
+agent lifecycle. These callbacks enable comprehensive logging, session
+memory persistence, and Telegram notifications for tool usage.
 """
 
 import logging
@@ -222,3 +222,40 @@ class LoggingCallbacks:
         self.logger.debug(f"Tool response: {tool_response}")
 
         return None
+
+
+async def notify_tool_call(
+    tool: BaseTool,
+    args: dict[str, Any],
+    tool_context: ToolContext,
+) -> None:
+    """Send Telegram notification when a tool is called.
+
+    This async callback notifies users in real-time when the agent
+    invokes a tool, providing better observability into agent actions.
+
+    Args:
+        tool: The tool being invoked.
+        args: Arguments being passed to the tool.
+        tool_context: Context containing agent name, invocation ID,
+            state, user content, and event actions.
+    """
+    from .telegram.notifications import get_notification_service
+
+    # Get user_id from session state (set by TelegramHandler)
+    user_id = tool_context.state.get("user_id")
+    if not user_id:
+        logger.debug("No user_id in session state, skipping tool notification")
+        return None
+
+    try:
+        notification_service = get_notification_service()
+        await notification_service.notify_tool_call(
+            chat_id=user_id,
+            tool_name=tool.name,
+            args=args if args else None,
+        )
+    except Exception:
+        logger.exception("Failed to send tool notification")
+
+    return None
