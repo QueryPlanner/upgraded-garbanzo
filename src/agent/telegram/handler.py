@@ -5,12 +5,25 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 """
 
 import logging
+from datetime import datetime
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 logger = logging.getLogger(__name__)
+
+# Template for injecting reminders into the agent's context
+REMINDER_PROMPT_TEMPLATE = """[REMINDER NOTIFICATION]
+
+You previously asked me to remind you about the following:
+
+"{reminder_message}"
+
+This reminder was scheduled for {scheduled_time}.
+
+Please acknowledge this reminder in a helpful and personalized way.
+If appropriate, you can offer to help with any related tasks."""
 
 
 class TelegramHandler:
@@ -161,6 +174,51 @@ class TelegramHandler:
             )
             return False
 
+    async def process_reminder(
+        self,
+        user_id: str,
+        reminder_message: str,
+        scheduled_time: datetime,
+        session_id: str | None = None,
+    ) -> str:
+        """Process a reminder through the ADK agent for personalized response.
+
+        This method injects a reminder as a simulated user message, allowing
+        the agent to generate a contextual, personalized response rather than
+        sending a hardcoded notification.
+
+        Args:
+            user_id: Unique identifier for the user (e.g., Telegram chat ID).
+            reminder_message: The original reminder message the user set.
+            scheduled_time: When the reminder was scheduled for.
+            session_id: Optional session ID for conversation continuity.
+                If not provided, user_id is used as session_id.
+
+        Returns:
+            The agent's personalized response to the reminder.
+        """
+        # Format the scheduled time for display
+        time_str = scheduled_time.strftime("%Y-%m-%d %H:%M UTC")
+
+        # Create the reminder prompt using the template
+        prompt = REMINDER_PROMPT_TEMPLATE.format(
+            reminder_message=reminder_message,
+            scheduled_time=time_str,
+        )
+
+        logger.info(
+            f"Processing reminder for user {user_id}: '{reminder_message[:30]}...'"
+        )
+
+        # Process through the agent using the existing message flow
+        response = await self.process_message(
+            user_id=user_id,
+            message=prompt,
+            session_id=session_id,
+        )
+
+        return response
+
 
 # Global handler instance for backwards compatibility with module-level functions
 _handler: TelegramHandler | None = None
@@ -231,3 +289,12 @@ async def reset_session(user_id: str, session_id: str | None = None) -> bool:
     if _handler is None:
         return False
     return await _handler.reset_session(user_id=user_id, session_id=session_id)
+
+
+def get_handler() -> TelegramHandler | None:
+    """Get the global TelegramHandler instance.
+
+    Returns:
+        The global TelegramHandler instance, or None if not initialized.
+    """
+    return _handler

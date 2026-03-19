@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from agent.telegram.bot import (
@@ -188,7 +189,7 @@ class TestHandleMessage:
     async def test_processes_message_and_sends_response(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:
-        """Test that message is processed and response is sent."""
+        """Test that message is processed and response is sent with MARKDOWN_V2."""
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
@@ -196,8 +197,9 @@ class TestHandleMessage:
         ):
             await handle_message(mock_update, mock_context)
 
+            # ! is special char and gets escaped, ? is not
             mock_update.message.reply_text.assert_called_once_with(
-                "Hello! How can I help?"
+                "Hello\\! How can I help?", parse_mode=ParseMode.MARKDOWN_V2
             )
 
     @pytest.mark.asyncio
@@ -317,7 +319,7 @@ class TestHandleMessage:
     async def test_sends_single_message_when_under_limit(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:
-        """Test that short messages are sent as single message."""
+        """Test that short messages are sent as single message with MARKDOWN_V2."""
         short_response = "Short response"
 
         with patch(
@@ -327,7 +329,9 @@ class TestHandleMessage:
         ):
             await handle_message(mock_update, mock_context)
 
-            mock_update.message.reply_text.assert_called_once_with(short_response)
+            mock_update.message.reply_text.assert_called_once_with(
+                short_response, parse_mode=ParseMode.MARKDOWN_V2
+            )
 
 
 class TestSendLongMessage:
@@ -350,7 +354,7 @@ class TestSendLongMessage:
 
     @pytest.mark.asyncio
     async def test_sends_single_message_for_short_text(self) -> None:
-        """Test that short text is sent as single message."""
+        """Test that short text is sent as single message with MARKDOWN_V2."""
         mock_message = MagicMock()
         mock_message.reply_text = AsyncMock()
 
@@ -358,7 +362,9 @@ class TestSendLongMessage:
 
         await _send_long_message(mock_message, short_text)
 
-        mock_message.reply_text.assert_called_once_with(short_text)
+        mock_message.reply_text.assert_called_once_with(
+            short_text, parse_mode=ParseMode.MARKDOWN_V2
+        )
 
     @pytest.mark.asyncio
     async def test_preserves_paragraph_formatting(self) -> None:

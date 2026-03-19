@@ -1,5 +1,6 @@
 """Tests for telegram_handler module."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,7 +9,9 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from agent.telegram.handler import (
+    REMINDER_PROMPT_TEMPLATE,
     TelegramHandler,
+    get_handler,
     initialize_runner,
     process_message,
     reset_session,
@@ -444,3 +447,159 @@ class TestResetSessionFunction:
             mock_handler_reset.assert_called_once_with(
                 user_id="user-1", session_id="custom-session"
             )
+
+
+class TestProcessReminder:
+    """Tests for process_reminder method."""
+
+    @pytest.mark.asyncio
+    async def test_processes_reminder_through_agent(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test that reminder is processed through the agent."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        async def mock_run_async(**kwargs: object) -> object:
+            yield MagicMock(
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part(text="Hey! Don't forget about lunch!")],
+                )
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            response = await handler.process_reminder(
+                user_id="user-1",
+                reminder_message="lunch",
+                scheduled_time=datetime(2026, 3, 19, 12, 0, tzinfo=UTC),
+            )
+
+        assert "lunch" in response or "Hey!" in response
+
+    @pytest.mark.asyncio
+    async def test_formats_reminder_prompt_correctly(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test that reminder prompt is formatted with correct information."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        captured_message: str | None = None
+
+        async def mock_run_async(
+            user_id: str, session_id: str, new_message: types.Content, **kwargs: object
+        ) -> object:
+            nonlocal captured_message
+            if new_message.parts:
+                captured_message = new_message.parts[0].text
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="Response")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            await handler.process_reminder(
+                user_id="user-1",
+                reminder_message="take a break",
+                scheduled_time=datetime(2026, 3, 19, 15, 30, tzinfo=UTC),
+            )
+
+        # Verify the prompt contains the reminder message and time
+        assert captured_message is not None
+        assert "take a break" in captured_message
+        assert "2026-03-19 15:30" in captured_message
+        assert "[REMINDER NOTIFICATION]" in captured_message
+
+    @pytest.mark.asyncio
+    async def test_uses_user_id_as_session_id(self, mock_agent: MagicMock) -> None:
+        """Test that user_id is used as session_id for reminder context."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        captured_session_id: str | None = None
+
+        async def mock_run_async(
+            user_id: str, session_id: str, **kwargs: object
+        ) -> object:
+            nonlocal captured_session_id
+            captured_session_id = session_id
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="OK")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            await handler.process_reminder(
+                user_id="user-42",
+                reminder_message="test",
+                scheduled_time=datetime.now(UTC),
+            )
+
+        assert captured_session_id == "user-42"
+
+    @pytest.mark.asyncio
+    async def test_uses_custom_session_id_when_provided(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test that custom session_id is used when provided."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        captured_session_id: str | None = None
+
+        async def mock_run_async(
+            user_id: str, session_id: str, **kwargs: object
+        ) -> object:
+            nonlocal captured_session_id
+            captured_session_id = session_id
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="OK")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            await handler.process_reminder(
+                user_id="user-42",
+                reminder_message="test",
+                scheduled_time=datetime.now(UTC),
+                session_id="custom-session",
+            )
+
+        assert captured_session_id == "custom-session"
+
+
+class TestGetHandler:
+    """Tests for get_handler function."""
+
+    def test_returns_none_when_not_initialized(self) -> None:
+        """Test that None is returned when handler not initialized."""
+        from agent.telegram import handler
+
+        handler._handler = None
+
+        result = get_handler()
+
+        assert result is None
+
+    def test_returns_handler_when_initialized(self, mock_agent: MagicMock) -> None:
+        """Test that handler is returned when initialized."""
+        initialize_runner(mock_agent, app_name="test-app")
+
+        result = get_handler()
+
+        assert result is not None
+        assert isinstance(result, TelegramHandler)
+
+
+class TestReminderPromptTemplate:
+    """Tests for the reminder prompt template."""
+
+    def test_template_contains_placeholder(self) -> None:
+        """Test that template contains required placeholders."""
+        assert "{reminder_message}" in REMINDER_PROMPT_TEMPLATE
+        assert "{scheduled_time}" in REMINDER_PROMPT_TEMPLATE
+
+    def test_template_formats_correctly(self) -> None:
+        """Test that template can be formatted without errors."""
+        result = REMINDER_PROMPT_TEMPLATE.format(
+            reminder_message="Test reminder",
+            scheduled_time="2026-03-19 12:00 UTC",
+        )
+
+        assert "Test reminder" in result
+        assert "2026-03-19 12:00 UTC" in result
+        assert "[REMINDER NOTIFICATION]" in result
