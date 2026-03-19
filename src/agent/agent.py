@@ -19,7 +19,11 @@ from google.adk.plugins.global_instruction_plugin import (  # noqa: E402
 from google.adk.plugins.logging_plugin import LoggingPlugin  # noqa: E402
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool  # noqa: E402
 
-from .callbacks import LoggingCallbacks, add_session_to_memory  # noqa: E402
+from .callbacks import (  # noqa: E402
+    LoggingCallbacks,
+    add_session_to_memory,
+    notify_tool_call,
+)
 from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
@@ -110,7 +114,7 @@ root_agent = LlmAgent(
     ],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,
-    before_tool_callback=logging_callbacks.before_tool,
+    before_tool_callback=[logging_callbacks.before_tool, notify_tool_call],
     after_tool_callback=logging_callbacks.after_tool,
 )
 
