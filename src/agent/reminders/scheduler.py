@@ -1,7 +1,8 @@
 """Scheduler for sending reminders via Telegram.
 
 This module uses APScheduler to periodically check for due reminders
-and send them to users via Telegram push messages.
+and sends them to users via Telegram. Reminders are processed through
+the ADK agent for personalized, context-aware responses.
 """
 
 import logging
@@ -16,6 +17,8 @@ from .storage import Reminder, get_storage
 if TYPE_CHECKING:
     from telegram import Bot
 
+    from ..telegram.handler import TelegramHandler
+
 logger = logging.getLogger(__name__)
 
 # Check for due reminders every 30 seconds
@@ -26,10 +29,13 @@ class ReminderScheduler:
     """Scheduler that sends due reminders via Telegram.
 
     This class manages an APScheduler instance that periodically checks
-    for reminders that are due and sends them to users.
+    for reminders that are due and sends them to users. When a TelegramHandler
+    is configured, reminders are processed through the ADK agent for
+    personalized, context-aware responses.
 
     Attributes:
         bot: The Telegram Bot instance for sending messages.
+        handler: The TelegramHandler for agent-aware reminder processing.
         scheduler: The APScheduler instance.
         storage: The ReminderStorage instance.
     """
@@ -41,6 +47,7 @@ class ReminderScheduler:
             bot: Optional Telegram Bot instance. Can be set later via set_bot().
         """
         self._bot: Bot | None = bot
+        self._handler: TelegramHandler | None = None
         self.scheduler = AsyncIOScheduler(timezone="UTC")
         self.storage = get_storage()
         self._running = False
@@ -53,6 +60,19 @@ class ReminderScheduler:
         """
         self._bot = bot
         logger.info("Telegram bot instance set in scheduler")
+
+    def set_handler(self, handler: "TelegramHandler") -> None:
+        """Set the TelegramHandler for agent-aware reminder processing.
+
+        When a handler is set, reminders will be processed through the ADK
+        agent, allowing for personalized, context-aware responses instead
+        of simple hardcoded notifications.
+
+        Args:
+            handler: The TelegramHandler instance for processing reminders.
+        """
+        self._handler = handler
+        logger.info("TelegramHandler set in scheduler for agent-aware reminders")
 
     @property
     def bot(self) -> "Bot":
@@ -127,6 +147,10 @@ class ReminderScheduler:
     async def _send_reminder(self, reminder: Reminder) -> None:
         """Send a reminder notification to the user.
 
+        If a TelegramHandler is configured, the reminder is processed through
+        the ADK agent for a personalized, context-aware response. Otherwise,
+        falls back to a simple hardcoded message.
+
         Args:
             reminder: The reminder to send.
         """
@@ -135,12 +159,34 @@ class ReminderScheduler:
             return
 
         try:
-            # Send the reminder message
-            await self.bot.send_message(
-                chat_id=reminder.user_id,
-                text=f"⏰ *Reminder*\n\n{reminder.message}",
-                parse_mode="Markdown",
-            )
+            # Parse the scheduled time from the reminder
+            scheduled_time = datetime.fromisoformat(reminder.trigger_time)
+
+            # Check if we have a handler for agent-aware reminders
+            if self._handler is not None:
+                # Process through the agent for personalized response
+                logger.info(
+                    f"Processing reminder {reminder.id} through agent for "
+                    f"user {reminder.user_id}"
+                )
+                response = await self._handler.process_reminder(
+                    user_id=reminder.user_id,
+                    reminder_message=reminder.message,
+                    scheduled_time=scheduled_time,
+                )
+
+                # Send the agent's response via Telegram
+                await self.bot.send_message(
+                    chat_id=reminder.user_id,
+                    text=response,
+                )
+            else:
+                # Fallback to simple hardcoded message
+                await self.bot.send_message(
+                    chat_id=reminder.user_id,
+                    text=f"⏰ *Reminder*\n\n{reminder.message}",
+                    parse_mode="Markdown",
+                )
 
             # Mark as sent
             await self.storage.mark_sent(reminder.id)

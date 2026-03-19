@@ -39,6 +39,7 @@ load_dotenv()
 from ..agent import root_agent  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
 from .handler import (  # noqa: E402
+    get_handler,
     initialize_runner,
     process_message,
     reset_session,
@@ -355,6 +356,17 @@ async def _set_bot_commands(application: Application) -> None:
     # Initialize and start the reminder scheduler
     scheduler = get_scheduler()
     scheduler.set_bot(application.bot)
+
+    # Set the TelegramHandler for agent-aware reminders
+    handler = get_handler()
+    if handler is not None:
+        scheduler.set_handler(handler)
+        logger.info("Agent-aware reminders enabled")
+    else:
+        logger.warning(
+            "TelegramHandler not initialized, reminders will use simple format"
+        )
+
     await scheduler.start()
     logger.info("Reminder scheduler started")
 
