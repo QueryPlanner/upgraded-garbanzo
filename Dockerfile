@@ -49,8 +49,14 @@ RUN groupadd -g 1000 app && \
 # Set working directory
 WORKDIR /app
 
-# Pre-create the artifacts directory and set ownership
-RUN mkdir -p /app/src/.adk/artifacts && chown -R app:app /app
+# Pre-create directories for volume mounts and set ownership
+# - /app/src/.adk: ADK artifacts
+# - /app/src/agent/data: User data (reminders.db, fitness.db)
+# - /app/src/.context: Context files (USER.md, IDENTITY.md, SOUL.md)
+RUN mkdir -p /app/src/.adk/artifacts \
+             /app/src/agent/data \
+             /app/src/.context \
+    && chown -R app:app /app
 
 # Copy application and virtual environment from builder
 COPY --from=builder --chown=app:app /app .
