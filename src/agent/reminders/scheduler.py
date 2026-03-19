@@ -179,6 +179,7 @@ class ReminderScheduler:
                 await self.bot.send_message(
                     chat_id=reminder.user_id,
                     text=response,
+                    parse_mode="Markdown",
                 )
             else:
                 # Fallback to simple hardcoded message

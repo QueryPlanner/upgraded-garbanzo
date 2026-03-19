@@ -211,7 +211,7 @@ class TestAgentAwareReminders:
     async def test_send_reminder_handles_handler_exception(
         self, isolated_db_path: Path
     ) -> None:
-        """Test that reminder is still sent if handler fails."""
+        """Test handler exception is caught and reminder is not sent."""
         storage = ReminderStorage(db_path=isolated_db_path)
         scheduler = ReminderScheduler()
         scheduler.storage = storage
