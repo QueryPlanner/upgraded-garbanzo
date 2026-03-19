@@ -37,6 +37,7 @@ from .tools import (  # noqa: E402
     example_tool,
     get_calorie_stats,
     get_workout_stats,
+    get_youtube_transcript,
     list_calories,
     list_context_files,
     list_reminders,
@@ -127,6 +128,8 @@ root_agent = LlmAgent(
         read_context_file,
         write_context_file,
         list_context_files,
+        # YouTube transcript tool
+        get_youtube_transcript,
         # Skills (lazy-loaded toolsets)
         skill_toolset,
     ],
