@@ -67,6 +67,7 @@ if model_name.lower().startswith("openrouter/"):
         )
     litellm_kwargs["api_key"] = openrouter_key
     logger.info(f"Configuring OpenRouter model: {model_name}")
+
 elif model_name.lower().startswith("gemini") or model_name.lower().startswith("google"):
     # For Google models, we can use either GOOGLE_API_KEY or the default
     google_key = os.getenv("GOOGLE_API_KEY")
