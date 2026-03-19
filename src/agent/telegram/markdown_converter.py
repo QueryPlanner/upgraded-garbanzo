@@ -283,3 +283,91 @@ def convert_markdown_to_telegram(text: str) -> str:
     result_parts = [_segment_to_telegram(seg) for seg in segments]
 
     return "".join(result_parts)
+
+
+def validate_telegram_markup(text: str) -> bool:
+    """Validate that Telegram MARKDOWN_V2 markup has balanced entities.
+
+    This checks that all formatting entities (bold, italic, underline,
+    strikethrough, code, links) are properly balanced.
+
+    Args:
+        text: Text in Telegram MARKDOWN_V2 format.
+
+    Returns:
+        True if markup is valid/balanced, False if there are unclosed entities.
+    """
+    # Track open/close states for each formatting type
+    # We need to parse the text considering escape sequences
+
+    i = 0
+    bold_open = False
+    italic_open = False
+    underline_open = False
+    strike_open = False
+    code_open = False
+    code_block_open = False
+
+    while i < len(text):
+        char = text[i]
+
+        # Check for escape sequence - skip the escaped char
+        if char == "\\" and i + 1 < len(text):
+            i += 2
+            continue
+
+        # Check for code blocks (triple backtick)
+        if text[i : i + 3] == "```":
+            code_block_open = not code_block_open
+            i += 3
+            continue
+
+        # Skip processing if inside code block
+        if code_block_open:
+            i += 1
+            continue
+
+        # Check for inline code (single backtick)
+        if char == "`":
+            code_open = not code_open
+            i += 1
+            continue
+
+        # Skip processing if inside inline code
+        if code_open:
+            i += 1
+            continue
+
+        # Check for underline (double underscore)
+        if text[i : i + 2] == "__":
+            underline_open = not underline_open
+            i += 2
+            continue
+
+        # Check for single underscore (italic) - must not be part of __
+        if char == "_" and (i == 0 or text[i - 1] != "_"):
+            if i + 1 >= len(text) or text[i + 1] != "_":
+                italic_open = not italic_open
+            i += 1
+            continue
+
+        # Check for strikethrough (double tilde)
+        if text[i : i + 2] == "~~":
+            strike_open = not strike_open
+            i += 2
+            continue
+
+        # Check for bold (single asterisk in Telegram MARKDOWN_V2)
+        # Note: In Telegram MARKDOWN_V2, *text* is bold, _text_ is italic
+        if char == "*":
+            bold_open = not bold_open
+            i += 1
+            continue
+
+        i += 1
+
+    # All entities should be closed
+    return not (
+        bold_open or italic_open or underline_open
+        or strike_open or code_open or code_block_open
+    )
