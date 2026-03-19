@@ -553,13 +553,20 @@ class TestCreateApplication:
     def test_uses_root_agent(self) -> None:
         """Test that root_agent is used for initialization."""
         with (
+            patch(
+                "agent.telegram.bot.create_session_service_for_runner"
+            ) as mock_session,
             patch("agent.telegram.bot.initialize_runner") as mock_init,
             patch("agent.telegram.bot.root_agent") as mock_agent,
         ):
+            mock_session.return_value = MagicMock()
             create_application("test-token-123")
 
+            mock_session.assert_called_once()
             mock_init.assert_called_once_with(
-                agent=mock_agent, app_name="telegram-adk-bot"
+                agent=mock_agent,
+                app_name="telegram-adk-bot",
+                session_service=mock_session.return_value,
             )
 
 

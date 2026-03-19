@@ -38,6 +38,7 @@ load_dotenv()
 
 from ..agent import root_agent  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
+from ..utils.session import create_session_service_for_runner  # noqa: E402
 from .handler import (  # noqa: E402
     get_handler,
     initialize_runner,
@@ -321,8 +322,15 @@ def create_application(token: str) -> Application:
     Returns:
         Configured Application instance with handlers registered.
     """
+    # Create session service (uses DATABASE_URL when set for persistence)
+    session_service = create_session_service_for_runner()
+
     # Initialize the ADK runner with the root agent
-    initialize_runner(agent=root_agent, app_name="telegram-adk-bot")
+    initialize_runner(
+        agent=root_agent,
+        app_name="telegram-adk-bot",
+        session_service=session_service,
+    )
 
     # Create the Telegram Application
     application = (
