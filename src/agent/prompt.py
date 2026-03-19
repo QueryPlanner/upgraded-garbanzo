@@ -51,7 +51,7 @@ def load_context(context_dir: Path | None = None) -> str:
     Returns:
         Combined context string with all loaded files, or empty string if none found.
     """
-    context_files = ["IDENTITY.md", "SOUL.md", "USER.md"]
+    context_files = ["BOOTSTRAP.md", "IDENTITY.md", "SOUL.md", "USER.md"]
     parts: list[str] = []
 
     for filename in context_files:

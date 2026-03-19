@@ -33,6 +33,7 @@ from .skills.loader import create_skill_toolset  # noqa: E402
 from .tools import (  # noqa: E402
     add_calories,
     cancel_reminder,
+    delete_context_file,
     delete_fitness_entry,
     example_tool,
     get_calorie_stats,
@@ -127,6 +128,7 @@ root_agent = LlmAgent(
         # Context file tools (secure file operations)
         read_context_file,
         write_context_file,
+        delete_context_file,
         list_context_files,
         # YouTube transcript tool
         get_youtube_transcript,

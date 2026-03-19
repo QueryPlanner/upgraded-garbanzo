@@ -940,6 +940,39 @@ def write_context_file(
         return {"status": "error", "message": f"Failed to write file: {e}"}
 
 
+def delete_context_file(
+    tool_context: ToolContext,  # noqa: ARG001
+    filename: str,
+) -> dict[str, Any]:
+    """Delete a file from the .context/ directory.
+
+    Args:
+        tool_context: ADK ToolContext (unused but required by ADK).
+        filename: The filename to delete (e.g., "BOOTSTRAP.md").
+
+    Returns:
+        A dictionary with status and confirmation or error message.
+    """
+    try:
+        file_path = _validate_context_filename(filename)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    if not file_path.exists():
+        return {"status": "error", "message": f"File '{filename}' not found."}
+
+    try:
+        file_path.unlink()
+        return {
+            "status": "success",
+            "filename": filename,
+            "message": f"Successfully deleted '{filename}'.",
+        }
+    except Exception as e:
+        logger.exception("Failed to delete context file")
+        return {"status": "error", "message": f"Failed to delete file: {e}"}
+
+
 def list_context_files(
     tool_context: ToolContext,  # noqa: ARG001
 ) -> dict[str, Any]:

@@ -65,6 +65,9 @@ COPY --from=builder --chown=app:app /app .
 COPY --chown=app:app entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
+# Copy context files (IDENTITY.md, SOUL.md - USER.md is user-specific)
+COPY --chown=app:app .context/*.md /app/src/.context/
+
 # Set environment to use virtual environment
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
