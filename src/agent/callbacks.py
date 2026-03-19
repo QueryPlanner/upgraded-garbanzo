@@ -265,7 +265,7 @@ async def notify_tool_call(
         # Log at INFO level to catch this issue in production
         logger.info(
             f"No user_id in session state for tool '{tool.name}', "
-            f"session keys: {list(tool_context.state.keys())}, "
+            f"session keys: {list(tool_context.state.to_dict().keys())}, "
             "skipping tool notification"
         )
         return None
