@@ -35,6 +35,16 @@ def mock_dependencies() -> Generator[MagicMock]:
         mock_env.db_max_overflow = 10
         mock_env.db_pool_timeout = 30
 
+        # Computed properties (new interface)
+        mock_env.session_db_kwargs = {
+            "pool_pre_ping": True,
+            "pool_recycle": 1800,
+            "pool_size": 5,
+            "max_overflow": 10,
+            "pool_timeout": 30,
+        }
+        mock_env.asyncpg_session_uri = "postgresql+asyncpg://user:pass@localhost/db"
+
         mock_init_env.return_value = mock_env
 
         yield mock_get_app
