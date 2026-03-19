@@ -1,6 +1,6 @@
 services:
   telegram-bot:
-    image: ghcr.io/queryplanner/google-adk-on-bare-metal:main
+    image: ${IMAGE}
     build: .
     environment:
       - AGENT_NAME=telegram-agent

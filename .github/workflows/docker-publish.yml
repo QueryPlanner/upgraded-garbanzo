@@ -107,6 +107,7 @@ jobs:
 
       - name: Pull and Deploy
         run: |
+          export IMAGE="ghcr.io/${GITHUB_REPOSITORY@L}:main"
           docker compose pull
           docker compose up -d
           docker image prune -f
