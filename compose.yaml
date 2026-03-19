@@ -9,9 +9,16 @@ services:
     env_file:
       - .env
     volumes:
+      # ADK artifacts (session artifacts, etc.)
       - agent_artifacts:/app/src/.adk
+      # User data: reminders.db, fitness.db
+      - agent_data:/app/src/agent/data
+      # Context files: USER.md, IDENTITY.md, SOUL.md
+      - agent_context:/app/src/.context
     restart: always
     command: python -m agent.telegram.bot
 
 volumes:
   agent_artifacts:
+  agent_data:
+  agent_context:
