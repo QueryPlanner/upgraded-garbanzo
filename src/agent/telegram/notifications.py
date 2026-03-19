@@ -90,6 +90,7 @@ class ToolNotificationService:
             args: Optional dictionary of tool arguments.
         """
         if not self._enabled:
+            logger.info(f"Tool notifications disabled, skipping '{tool_name}'")
             return
 
         if self._bot is None:

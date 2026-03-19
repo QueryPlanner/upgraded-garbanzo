@@ -132,7 +132,7 @@ root_agent = LlmAgent(
     ],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,
-    before_tool_callback=[logging_callbacks.before_tool, notify_tool_call],
+    before_tool_callback=notify_tool_call,
     after_tool_callback=logging_callbacks.after_tool,
 )
 
