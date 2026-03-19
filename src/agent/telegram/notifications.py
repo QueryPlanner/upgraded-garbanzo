@@ -8,6 +8,8 @@ to provide observability into agent actions.
 import logging
 from typing import TYPE_CHECKING
 
+from telegram.constants import ParseMode
+
 if TYPE_CHECKING:
     from telegram import Bot
 
@@ -24,6 +26,8 @@ class ToolNotificationService:
         bot: The Telegram Bot instance for sending messages.
         enabled: Whether notifications are enabled.
     """
+
+    MAX_ARGS_LENGTH = 200
 
     def __init__(self, bot: "Bot | None" = None, enabled: bool = True) -> None:
         """Initialize the notification service.
@@ -99,14 +103,14 @@ class ToolNotificationService:
             if args:
                 # Truncate args if too long
                 args_str = str(args)
-                if len(args_str) > 200:
-                    args_str = args_str[:197] + "..."
+                if len(args_str) > self.MAX_ARGS_LENGTH:
+                    args_str = args_str[: self.MAX_ARGS_LENGTH - 3] + "..."
                 message += f"\n📋 *Args:* `{args_str}`"
 
             await self.bot.send_message(
                 chat_id=chat_id,
                 text=message,
-                parse_mode="Markdown",
+                parse_mode=ParseMode.MARKDOWN,
             )
             logger.debug(f"Sent tool notification for {tool_name} to {chat_id}")
 
