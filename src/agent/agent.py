@@ -31,14 +31,16 @@ from .tools import (  # noqa: E402
     cancel_reminder,
     delete_fitness_entry,
     example_tool,
-    execute_bash,
     get_calorie_stats,
     get_workout_stats,
     list_calories,
+    list_context_files,
     list_reminders,
     list_workouts,
     log_workout,
+    read_context_file,
     schedule_reminder,
+    write_context_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,8 +101,10 @@ root_agent = LlmAgent(
         list_workouts,
         get_workout_stats,
         delete_fitness_entry,
-        # Utility tools
-        execute_bash,
+        # Context file tools (secure file operations)
+        read_context_file,
+        write_context_file,
+        list_context_files,
         # Skills (lazy-loaded toolsets)
         skill_toolset,
     ],

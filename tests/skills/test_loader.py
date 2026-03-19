@@ -1,6 +1,7 @@
 """Tests for skills loader module."""
 
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,7 +17,7 @@ from agent.skills.loader import (
 
 
 @pytest.fixture
-def temp_skills_dir() -> Path:
+def temp_skills_dir() -> Generator[Path]:
     """Create a temporary skills directory with a valid skill."""
     with tempfile.TemporaryDirectory() as tmpdir:
         skills_path = Path(tmpdir)
@@ -39,7 +40,7 @@ It contains instructions for the agent.
 
 
 @pytest.fixture
-def invalid_skill_dir() -> Path:
+def invalid_skill_dir() -> Generator[Path]:
     """Create a temporary skills directory with an invalid skill."""
     with tempfile.TemporaryDirectory() as tmpdir:
         skills_path = Path(tmpdir)
@@ -54,7 +55,7 @@ def invalid_skill_dir() -> Path:
 
 
 @pytest.fixture
-def missing_fields_skill_dir() -> Path:
+def missing_fields_skill_dir() -> Generator[Path]:
     """Create a skill with missing required fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
         skills_path = Path(tmpdir)
@@ -157,12 +158,14 @@ class TestCreateSkillToolset:
 
     def test_create_toolset_empty_directory(self) -> None:
         """Test creating a toolset from an empty directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("agent.skills.loader.logger") as mock_logger:
-                toolset = create_skill_toolset(Path(tmpdir))
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("agent.skills.loader.logger") as mock_logger,
+        ):
+            toolset = create_skill_toolset(Path(tmpdir))
 
-                assert toolset is not None
-                mock_logger.warning.assert_called_once()
+            assert toolset is not None
+            mock_logger.warning.assert_called_once()
 
 
 class TestDefaultSkillsDir:
@@ -172,4 +175,4 @@ class TestDefaultSkillsDir:
         """Test that the default skills dir is correctly set."""
         # The default should be at project root/skills
         assert DEFAULT_SKILLS_DIR.name == "skills"
-        assert "upgraded-garbanzo" in str(DEFAULT_SKILLS_DIR)
+        assert DEFAULT_SKILLS_DIR.is_absolute()

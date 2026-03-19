@@ -1,24 +1,17 @@
 services:
-  agent:
+  telegram-bot:
     image: ghcr.io/queryplanner/google-adk-on-bare-metal:main
     build: .
-    ports:
-      - "8080:8080"
     environment:
-      - HOST=0.0.0.0
-      - PORT=8080
-      - AGENT_NAME=local-dev
+      - AGENT_NAME=telegram-agent
       - LOG_LEVEL=INFO
-      - RELOAD_AGENTS=true
-      - SERVE_WEB_INTERFACE=true
-      # DATABASE_URL and API Keys will be loaded from the .env file
+      # DATABASE_URL, API Keys, and TELEGRAM_BOT_TOKEN loaded from .env
     env_file:
       - .env
-    # Volumes are for hot-reloading and persisting artifacts.
     volumes:
       - agent_artifacts:/app/src/.adk
     restart: always
-    command: python -m agent.server
+    command: python -m agent.telegram.bot
 
 volumes:
   agent_artifacts:

@@ -1,6 +1,7 @@
 """Tests for fitness storage module."""
 
 import tempfile
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -19,7 +20,7 @@ from agent.fitness.storage import _get_default_db_path
 
 
 @pytest.fixture
-def temp_db_path() -> Path:
+def temp_db_path() -> Generator[Path]:
     """Create a temporary database path."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir) / "test_fitness.db"

@@ -9,12 +9,14 @@ from google.adk.tools import ToolContext
 from agent.tools import (
     add_calories,
     delete_fitness_entry,
-    execute_bash,
     get_calorie_stats,
     get_workout_stats,
     list_calories,
+    list_context_files,
     list_workouts,
     log_workout,
+    read_context_file,
+    write_context_file,
 )
 
 
@@ -44,9 +46,7 @@ class TestAddCalories:
     @pytest.mark.asyncio
     async def test_add_calories_success(self, mock_tool_context: ToolContext) -> None:
         """Test adding calories successfully."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_calorie_entry = AsyncMock(return_value=1)
             mock_get_storage.return_value = mock_storage
@@ -110,9 +110,7 @@ class TestListCalories:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(return_value=[mock_entry])
             mock_get_storage.return_value = mock_storage
@@ -124,13 +122,9 @@ class TestListCalories:
             assert result["total_calories"] == 500
 
     @pytest.mark.asyncio
-    async def test_list_calories_empty(
-        self, mock_tool_context: ToolContext
-    ) -> None:
+    async def test_list_calories_empty(self, mock_tool_context: ToolContext) -> None:
         """Test listing calories when empty."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(return_value=[])
             mock_get_storage.return_value = mock_storage
@@ -149,9 +143,7 @@ class TestGetCalorieStats:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test getting calorie stats successfully."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_stats = AsyncMock(
                 return_value={
@@ -174,9 +166,7 @@ class TestLogWorkout:
     @pytest.mark.asyncio
     async def test_log_workout_success(self, mock_tool_context: ToolContext) -> None:
         """Test logging workout successfully."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_workout_entry = AsyncMock(return_value=1)
             mock_get_storage.return_value = mock_storage
@@ -227,9 +217,7 @@ class TestListWorkouts:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_entries = AsyncMock(return_value=[mock_entry])
             mock_get_storage.return_value = mock_storage
@@ -248,9 +236,7 @@ class TestGetWorkoutStats:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test getting workout stats successfully."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_stats = AsyncMock(
                 return_value={
@@ -271,13 +257,9 @@ class TestDeleteFitnessEntry:
     """Tests for delete_fitness_entry tool."""
 
     @pytest.mark.asyncio
-    async def test_delete_calorie_entry(
-        self, mock_tool_context: ToolContext
-    ) -> None:
+    async def test_delete_calorie_entry(self, mock_tool_context: ToolContext) -> None:
         """Test deleting a calorie entry."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.delete_entry = AsyncMock(return_value=True)
             mock_get_storage.return_value = mock_storage
@@ -291,13 +273,9 @@ class TestDeleteFitnessEntry:
             assert result["status"] == "success"
 
     @pytest.mark.asyncio
-    async def test_delete_workout_entry(
-        self, mock_tool_context: ToolContext
-    ) -> None:
+    async def test_delete_workout_entry(self, mock_tool_context: ToolContext) -> None:
         """Test deleting a workout entry."""
-        with patch(
-            "agent.tools.get_fitness_storage"
-        ) as mock_get_storage:
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.delete_entry = AsyncMock(return_value=True)
             mock_get_storage.return_value = mock_storage
@@ -325,40 +303,122 @@ class TestDeleteFitnessEntry:
         assert "Invalid entry_type" in result["message"]
 
 
-class TestExecuteBash:
-    """Tests for execute_bash tool."""
+class TestContextFileTools:
+    """Tests for secure context file tools."""
 
-    def test_execute_bash_echo(self, mock_tool_context: ToolContext) -> None:
-        """Test executing a simple echo command."""
-        result = execute_bash(mock_tool_context, "echo 'hello'")
+    def test_read_context_file_not_found(self, mock_tool_context: ToolContext) -> None:
+        """Test reading a non-existent file."""
+        result = read_context_file(mock_tool_context, "NONEXISTENT.md")
 
-        assert result["status"] == "success"
-        assert result["stdout"] == "hello"
+        assert result["status"] == "error"
+        assert "not found" in result["message"]
 
-    def test_execute_bash_dangerous_command(
+    def test_read_context_file_path_traversal(
         self, mock_tool_context: ToolContext
     ) -> None:
-        """Test that dangerous commands are blocked."""
-        result = execute_bash(mock_tool_context, "rm -rf /")
+        """Test that path traversal is blocked."""
+        result = read_context_file(mock_tool_context, "../pyproject.toml")
 
         assert result["status"] == "error"
-        assert "Blocked dangerous command" in result["message"]
+        assert "Invalid filename" in result["message"]
 
-    def test_execute_bash_sudo_blocked(self, mock_tool_context: ToolContext) -> None:
-        """Test that sudo commands are blocked."""
-        result = execute_bash(mock_tool_context, "sudo apt-get install something")
-
-        assert result["status"] == "error"
-        assert "Blocked dangerous command" in result["message"]
-
-    def test_execute_bash_timeout(self, mock_tool_context: ToolContext) -> None:
-        """Test command timeout."""
-        # This test uses a very short timeout
-        result = execute_bash(
-            mock_tool_context,
-            "sleep 10",
-            timeout=1,
-        )
+    def test_read_context_file_absolute_path(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test that absolute paths are blocked."""
+        result = read_context_file(mock_tool_context, "/etc/passwd")
 
         assert result["status"] == "error"
-        assert "timed out" in result["message"]
+        assert "Invalid filename" in result["message"]
+
+    def test_write_context_file_path_traversal(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test that write path traversal is blocked."""
+        result = write_context_file(mock_tool_context, "../outside.txt", "content")
+
+        assert result["status"] == "error"
+        assert "Invalid filename" in result["message"]
+
+    def test_empty_filename_blocked(self, mock_tool_context: ToolContext) -> None:
+        """Test that empty filename is rejected."""
+        result = read_context_file(mock_tool_context, "")
+
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
+
+    def test_list_context_files_no_directory(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test listing files when context dir doesn't exist."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from unittest.mock import patch
+
+            fake_path = Path(tmpdir) / "nonexistent"
+            with patch("agent.tools._CONTEXT_DIR", fake_path):
+                result = list_context_files(mock_tool_context)
+
+                assert result["status"] == "success"
+                assert result["files"] == []
+
+    def test_write_and_read_context_file_success(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test successful write and read of context file."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_dir = Path(tmpdir)
+            from unittest.mock import patch
+
+            with patch("agent.tools._CONTEXT_DIR", context_dir):
+                # Write a file
+                write_result = write_context_file(
+                    mock_tool_context, "TEST.md", "# Test Content\nHello World"
+                )
+                assert write_result["status"] == "success"
+                assert "Successfully wrote" in write_result["message"]
+
+                # Read it back
+                read_result = read_context_file(mock_tool_context, "TEST.md")
+                assert read_result["status"] == "success"
+                assert "Hello World" in read_result["content"]
+
+                # List files
+                list_result = list_context_files(mock_tool_context)
+                assert list_result["status"] == "success"
+                assert list_result["count"] == 1
+                assert list_result["files"][0]["name"] == "TEST.md"
+
+    def test_list_context_files_with_hidden_files(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test that hidden files are excluded from listing."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_dir = Path(tmpdir)
+            from unittest.mock import patch
+
+            # Create regular and hidden files
+            (context_dir / "VISIBLE.md").write_text("visible")
+            (context_dir / ".hidden").write_text("hidden")
+
+            with patch("agent.tools._CONTEXT_DIR", context_dir):
+                result = list_context_files(mock_tool_context)
+
+                assert result["status"] == "success"
+                assert result["count"] == 1
+                assert result["files"][0]["name"] == "VISIBLE.md"
+
+    def test_write_empty_filename(self, mock_tool_context: ToolContext) -> None:
+        """Test write with empty filename."""
+        result = write_context_file(mock_tool_context, "", "content")
+
+        assert result["status"] == "error"
+        assert "empty" in result["message"].lower()
