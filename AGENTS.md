@@ -92,7 +92,7 @@ uv run telegram-bot
 
 ### Pre-LLM latency
 
-Set `TELEGRAM_LATENCY_LOG=1` in `.env` to log structured timings at INFO (`telegram.pre_llm_latency`): milliseconds spent resolving the session, from starting the ADK run until the first streamed event, and total to that first event. The typing indicator is scheduled with `asyncio.create_task` so a slow `send_chat_action` response does not block session setup or the runner.
+Set `TELEGRAM_LATENCY_LOG=1` in `.env` for two INFO lines: `telegram.pre_llm_latency` reports `session_ms` (handler session I/O, e.g. Postgres, **before** `run_async`). `telegram.adk_first_stream_event` reports time from `run_async` until the **first yielded event** — with the current ADK runner this often **includes the LLM round-trip**, because the first event may arrive only when the model reply is ready, so do not treat it as “pre-LLM.” The typing indicator uses `asyncio.create_task` so a slow `send_chat_action` does not block session setup or the runner.
 
 ### Session Persistence
 

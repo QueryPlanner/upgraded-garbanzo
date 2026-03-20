@@ -99,9 +99,9 @@ class TestTelegramHandler:
         with patch.object(handler.runner, "run_async", mock_run_async):
             await handler.process_message("user-1", "Hello")
 
-        assert any(
-            "telegram.pre_llm_latency" in record.message for record in caplog.records
-        )
+        messages = [record.message for record in caplog.records]
+        assert any("telegram.pre_llm_latency" in m for m in messages)
+        assert any("telegram.adk_first_stream_event" in m for m in messages)
 
     @pytest.mark.asyncio
     async def test_process_message_uses_existing_session(

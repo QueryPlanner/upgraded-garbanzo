@@ -200,6 +200,15 @@ class TelegramHandler:
 
         # Run the agent and collect the response
         response_parts: list[str] = []
+        if latency_log:
+            session_ms = (session_ready - pipeline_start) * 1000
+            logger.info(
+                "telegram.pre_llm_latency user_id=%s session_ms=%.1f "
+                "(DB/session work in handler before run_async)",
+                user_id,
+                session_ms,
+            )
+
         run_started = time.perf_counter()
         first_stream_event_logged = False
         async for event in self.runner.run_async(
@@ -210,16 +219,13 @@ class TelegramHandler:
             if latency_log and not first_stream_event_logged:
                 first_stream_event_logged = True
                 first_event = time.perf_counter()
-                session_ms = (session_ready - pipeline_start) * 1000
-                run_to_first_ms = (first_event - run_started) * 1000
-                total_to_first_ms = (first_event - pipeline_start) * 1000
+                ms_after_run = (first_event - run_started) * 1000
                 logger.info(
-                    "telegram.pre_llm_latency user_id=%s session_ms=%.1f "
-                    "run_to_first_event_ms=%.1f total_to_first_event_ms=%.1f",
+                    "telegram.adk_first_stream_event user_id=%s "
+                    "ms_after_run_async_started=%.1f "
+                    "(often includes LLM; first yield may be late)",
                     user_id,
-                    session_ms,
-                    run_to_first_ms,
-                    total_to_first_ms,
+                    ms_after_run,
                 )
 
             # Extract text from model responses, filtering out thought parts
@@ -237,12 +243,10 @@ class TelegramHandler:
                         response_parts.append(part.text)
 
         if latency_log and not first_stream_event_logged:
-            session_only_ms = (session_ready - pipeline_start) * 1000
             logger.info(
-                "telegram.pre_llm_latency user_id=%s session_ms=%.1f "
-                "run_to_first_event_ms=n/a (no events from run_async)",
+                "telegram.adk_first_stream_event user_id=%s "
+                "ms_after_run_async_started=n/a (run_async yielded no events)",
                 user_id,
-                session_only_ms,
             )
 
         return "".join(response_parts)
