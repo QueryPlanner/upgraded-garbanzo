@@ -256,6 +256,28 @@ class SessionConfig(BaseModel):
             return uri.replace("postgresql://", "postgresql+asyncpg://", 1)
         return uri
 
+    @property
+    def effective_asyncpg_dsn(self) -> str | None:
+        """Postgres connection string for raw asyncpg (app tables, not SQLAlchemy).
+
+        Returns None when DATABASE_URL is unset, blank, non-Postgres, or only
+        AGENT_ENGINE is configured.
+
+        Returns:
+            Normalized ``postgresql://`` or ``postgres://`` DSN, or None.
+        """
+        raw = self.database_url
+        if raw is None or not str(raw).strip():
+            return None
+        url = str(raw).strip()
+        if url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        if not url.startswith(("postgresql://", "postgres://")):
+            return None
+        return url.replace("sslmode=require", "ssl=require").replace(
+            "&channel_binding=require", ""
+        )
+
 
 class ServerEnv(SessionConfig):
     """Environment configuration for local server development and deployment.

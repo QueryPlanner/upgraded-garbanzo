@@ -14,7 +14,7 @@ We believe you should own your agents. This template is designed to strip away t
 - 🔄 **CI/CD Included**: GitHub Actions workflow builds multi-arch images (AMD64/ARM64) and pushes to GHCR automatically.
 - 🔭 **Open Observability**: Built-in OpenTelemetry (OTel) instrumentation. Pre-configured for **Langfuse**, but easily adaptable to Jaeger, Prometheus, or any OTel-compatible backend.
 - 🚀 **Modern Stack**: Python 3.13, `uv`, `fastapi`, `asyncpg`.
-- 💾 **Production Persistence**: Postgres-backed sessions out of the box.
+- 💾 **Production Persistence**: Postgres-backed sessions, reminders, and fitness data.
 - ⏰ **Smart Reminders**: Schedule reminders via natural language with Telegram push notifications.
 
 ## Quickstart
@@ -30,7 +30,7 @@ We believe you should own your agents. This template is designed to strip away t
 Copy `.env.example` to `.env`:
 
 - **`AGENT_NAME`**: Unique ID for your agent.
-- **`DATABASE_URL`**: Postgres connection string.
+- **`DATABASE_URL`**: Postgres connection string (sessions plus `agent_reminders`, `agent_calories`, `agent_workouts` tables).
 - **`OPENROUTER_API_KEY`**: Recommended for accessing varied models.
 - **`GOOGLE_API_KEY`**: Optional. Required only if using Gemini models directly.
 

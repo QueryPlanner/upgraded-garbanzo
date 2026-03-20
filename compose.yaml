@@ -11,7 +11,7 @@ services:
     volumes:
       # ADK artifacts (session artifacts, etc.)
       - agent_artifacts:/app/src/.adk
-      # User data: reminders.db, fitness.db
+      # Local data dir (SQLite fallback if DATABASE_URL unset; context files path)
       - agent_data:/app/src/agent/data
       # Context files: USER.md, IDENTITY.md, SOUL.md
       - agent_context:/app/src/.context
