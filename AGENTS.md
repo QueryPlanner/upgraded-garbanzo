@@ -96,7 +96,7 @@ Set `TELEGRAM_LATENCY_LOG=1` in `.env` for two INFO lines: `telegram.pre_llm_lat
 
 ### Session Persistence
 
-The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set in `.env`, sessions are persisted in Postgres and survive restarts. Without it, sessions are in-memory only.
+The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set and `ADK_USE_DATABASE_SESSION` is true (default), sessions are persisted in Postgres and survive restarts. Set `ADK_USE_DATABASE_SESSION=false` to use **in-memory** ADK sessions while keeping `DATABASE_URL` for reminders, fitness, and other app tables (avoids Postgres latency on every Telegram message). For deployed bots, set the same variable in your host or **GitHub Actions environment** (or deployment secrets) so it is injected at runtime without committing `.env`.
 
 ## Development Conventions
 

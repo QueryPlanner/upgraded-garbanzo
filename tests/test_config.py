@@ -220,6 +220,28 @@ class TestServerEnv:
         assert "DB_POOL_SIZE" in output
         assert "DB_MAX_OVERFLOW" in output
         assert "DB_POOL_TIMEOUT" in output
+        assert "ADK_USE_DATABASE_SESSION" in output
+
+    def test_adk_use_database_session_defaults_true(
+        self, valid_server_env: dict[str, str]
+    ) -> None:
+        """ADK_USE_DATABASE_SESSION defaults to true for backward compatibility."""
+        env = ServerEnv.model_validate(valid_server_env)
+        assert env.adk_use_database_session is True
+
+    def test_adk_use_database_session_can_be_disabled(
+        self, valid_server_env: dict[str, str]
+    ) -> None:
+        """ADK_USE_DATABASE_SESSION=false; DATABASE_URL still valid for app pool."""
+        data = {
+            **valid_server_env,
+            "DATABASE_URL": "postgresql://user:pass@localhost/db",
+            "ADK_USE_DATABASE_SESSION": "false",
+        }
+        env = ServerEnv.model_validate(data)
+        assert env.adk_use_database_session is False
+        assert env.asyncpg_session_uri is not None
+        assert env.effective_asyncpg_dsn is not None
 
     def test_server_env_ignores_extra_fields(
         self, valid_server_env: dict[str, str]
