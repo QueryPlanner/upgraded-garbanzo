@@ -15,6 +15,7 @@ Usage:
 """
 
 import contextlib
+import html
 import logging
 import os
 import re
@@ -286,37 +287,62 @@ def _strip_telegram_escapes(text: str) -> str:
     return re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", text)
 
 
-def _render_markdown_as_plain_text(text: str) -> str:
-    """Convert common markdown patterns into readable plain text.
+def _normalize_markdown_fallback_text(text: str) -> str:
+    """Normalize markdown and LaTeX-like text for fallback rendering.
 
-    This is used only when Telegram rejects MARKDOWN_V2 formatting.
-    The goal is not perfect markdown rendering. It is to remove the
-    most distracting formatting markers so the user still gets a clean,
-    readable answer.
+    The goal is to keep the message readable when Telegram rejects
+    MARKDOWN_V2 formatting.
     """
-    plain_text = text
+    normalized_text = text
 
-    plain_text = re.sub(
+    normalized_text = re.sub(
         r"```[^\n]*\n([\s\S]*?)```",
         lambda match: match.group(1).strip(),
-        plain_text,
+        normalized_text,
     )
-    plain_text = re.sub(r"`([^`]+)`", r"\1", plain_text)
-    plain_text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", plain_text)
-    plain_text = re.sub(r"^#{1,6}\s*", "", plain_text, flags=re.MULTILINE)
-    plain_text = re.sub(r"(?<!\*)\*\*([^*]+)\*\*(?!\*)", r"\1", plain_text)
-    plain_text = re.sub(r"(?<!_)__([^_]+)__(?!_)", r"\1", plain_text)
-    plain_text = re.sub(r"~~([^~]+)~~", r"\1", plain_text)
-    plain_text = re.sub(r"(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)", r"\1", plain_text)
-    plain_text = re.sub(r"(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)", r"\1", plain_text)
-    plain_text = re.sub(r"\\text\s*\{([^{}]+)\}", r"\1", plain_text)
-    plain_text = plain_text.replace(r"\[", "[").replace(r"\]", "]")
-    plain_text = plain_text.replace(r"\(", "(").replace(r"\)", ")")
-    plain_text = plain_text.replace(r"\{", "{").replace(r"\}", "}")
-    plain_text = plain_text.replace(r"\%", "%")
-    plain_text = plain_text.replace(r"\-", "-")
+    normalized_text = re.sub(r"\\text\s*\{([^{}]+)\}", r"\1", normalized_text)
+    normalized_text = normalized_text.replace(r"\[", "[").replace(r"\]", "]")
+    normalized_text = normalized_text.replace(r"\(", "(").replace(r"\)", ")")
+    normalized_text = normalized_text.replace(r"\{", "{").replace(r"\}", "}")
+    normalized_text = normalized_text.replace(r"\%", "%")
+    normalized_text = normalized_text.replace(r"\-", "-")
 
-    return plain_text.strip()
+    return normalized_text.strip()
+
+
+def _render_markdown_as_html(text: str) -> str:
+    """Convert common markdown patterns into Telegram-safe HTML."""
+    normalized_text = _normalize_markdown_fallback_text(text)
+    escaped_text = html.escape(normalized_text)
+
+    escaped_text = re.sub(
+        r"\[([^\]]+)\]\(([^)]+)\)",
+        lambda match: (
+            f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>'
+        ),
+        escaped_text,
+    )
+    escaped_text = re.sub(
+        r"(?m)^#{1,6}\s*(.+)$",
+        lambda match: f"<b>{match.group(1).strip()}</b>",
+        escaped_text,
+    )
+    escaped_text = re.sub(r"(?<!\*)\*\*([^*]+)\*\*(?!\*)", r"<b>\1</b>", escaped_text)
+    escaped_text = re.sub(r"(?<!_)__([^_]+)__(?!_)", r"<u>\1</u>", escaped_text)
+    escaped_text = re.sub(r"~~([^~]+)~~", r"<s>\1</s>", escaped_text)
+    escaped_text = re.sub(
+        r"(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)",
+        r"<i>\1</i>",
+        escaped_text,
+    )
+    escaped_text = re.sub(
+        r"(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)",
+        r"<i>\1</i>",
+        escaped_text,
+    )
+    escaped_text = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped_text)
+
+    return escaped_text.strip()
 
 
 async def _send_validated_chunk(
@@ -332,12 +358,12 @@ async def _send_validated_chunk(
     Args:
         message: The Telegram message object to reply to.
         chunk: The text chunk to send.
-        fallback_text: Plain-text version to send if formatting fails.
+        fallback_text: Original markdown version to send if formatting fails.
     """
     if fallback_text is not None:
-        plain_text = _render_markdown_as_plain_text(fallback_text)
+        html_fallback = _render_markdown_as_html(fallback_text)
     else:
-        plain_text = _strip_telegram_escapes(chunk)
+        html_fallback = html.escape(_strip_telegram_escapes(chunk))
 
     if validate_telegram_markup(chunk):
         try:
@@ -345,14 +371,14 @@ async def _send_validated_chunk(
             return
         except TelegramError:
             logger.warning(
-                "Telegram rejected markdown chunk, retrying without formatting",
+                "Telegram rejected markdown chunk, retrying with HTML",
                 exc_info=True,
             )
 
     else:
-        logger.warning("Unbalanced markup detected, sending without formatting")
+        logger.warning("Unbalanced markup detected, retrying with HTML")
 
-    await message.reply_text(plain_text)
+    await message.reply_text(html_fallback, parse_mode=ParseMode.HTML)
 
 
 async def _split_and_send(message: Message, text: str) -> None:
