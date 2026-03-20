@@ -340,11 +340,11 @@ async def add_calories(
     Args:
         tool_context: ADK ToolContext with user_id in state.
         food_item: Description of the food consumed.
-        calories: Number of calories.
+        calories: Number of calories. (Estimate if not provided)
         meal_type: Type of meal (breakfast, lunch, dinner, snack).
-        protein: Grams of protein (optional).
-        carbs: Grams of carbohydrates (optional).
-        fat: Grams of fat (optional).
+        protein: Grams of protein (optional). (Estimate if not provided)
+        carbs: Grams of carbohydrates (optional). (Estimate if not provided)
+        fat: Grams of fat (optional). (Estimate if not provided)
         date: Date in YYYY-MM-DD format (default: today).
         notes: Additional notes (optional).
 
@@ -497,7 +497,7 @@ async def log_workout(
     exercise_name: str,
     exercise_type: str = "other",
     duration_minutes: int | None = None,
-    sets: int | None = None,
+    set: int | None = None,
     reps: int | None = None,
     weight: float | None = None,
     distance_km: float | None = None,
@@ -511,9 +511,11 @@ async def log_workout(
         exercise_name: Name of the exercise (e.g., "bench press", "running").
         exercise_type: Type of exercise (strength, cardio, flexibility, sports, other).
         duration_minutes: Duration in minutes (optional).
-        sets: Number of sets (for strength training).
+        set: Sequence number of the logged set (for strength training).
         reps: Reps per set (for strength training).
-        weight: Weight in kg (for strength training).
+        weight: Weight in kg (for strength training). For compact strength
+            notation such as "40x10", callers should usually interpret this as
+            40 kg and 10 reps unless the user clearly states another unit.
         distance_km: Distance in kilometers (for cardio).
         date: Date in YYYY-MM-DD format (default: today).
         notes: Additional notes (optional).
@@ -543,7 +545,7 @@ async def log_workout(
         exercise_type=exercise_type_enum,
         exercise_name=exercise_name,
         duration_minutes=duration_minutes,
-        sets=sets,
+        set=set,
         reps=reps,
         weight=weight,
         distance_km=distance_km,
@@ -557,9 +559,11 @@ async def log_workout(
         logger.info(f"Added workout entry {entry_id} for user {user_id}")
 
         details = []
-        if sets and reps:
-            details.append(f"{sets}x{reps}")
-        if weight:
+        if set:
+            details.append(f"set {set}")
+        if reps:
+            details.append(f"{reps} reps")
+        if weight is not None:
             details.append(f"{weight}kg")
         if duration_minutes:
             details.append(f"{duration_minutes}min")
@@ -621,7 +625,7 @@ async def list_workouts(
                 "exercise_name": e.exercise_name,
                 "exercise_type": e.exercise_type.value,
                 "duration_minutes": e.duration_minutes,
-                "sets": e.sets,
+                "set": e.set,
                 "reps": e.reps,
                 "weight": e.weight,
                 "distance_km": e.distance_km,

@@ -47,7 +47,7 @@ def _wo_row() -> dict[str, object]:
         "exercise_type": "strength",
         "exercise_name": "squat",
         "duration_minutes": 30,
-        "sets": 3,
+        "set": 3,
         "reps": 10,
         "weight": 100.0,
         "distance_km": None,
@@ -120,6 +120,7 @@ async def test_fitness_postgres_workout_and_delete(mock_pool: AsyncMock) -> None
 
         workouts = await storage.get_workout_entries("u1", exercise_type="strength")
         assert len(workouts) == 1
+        assert workouts[0].set == 3
         stats = await storage.get_workout_stats("u1")
         assert stats["total_workouts"] == 1
 

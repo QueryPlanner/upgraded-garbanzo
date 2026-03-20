@@ -114,7 +114,7 @@ root_agent = LlmAgent(
     model=model,
     instruction=return_instruction_root(),
     tools=[
-        PreloadMemoryTool(),
+        # PreloadMemoryTool(),
         example_tool,
         # Reminder tools
         get_current_datetime,
