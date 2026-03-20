@@ -24,16 +24,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Template for injecting reminders into the agent's context
-REMINDER_PROMPT_TEMPLATE = """[REMINDER NOTIFICATION]
+REMINDER_PROMPT_TEMPLATE = """[SCHEDULED REMINDER]
 
-You previously asked me to remind you about the following:
+Send the user a short message that delivers only this reminder (scheduled for
+{scheduled_time}):
 
 "{reminder_message}"
 
-This reminder was scheduled for {scheduled_time}.
-
-Please acknowledge this reminder in a helpful and personalized way.
-If appropriate, you can offer to help with any related tasks."""
+Rules: Your reply is what they see in Telegram. Stay on-topic: remind them of the
+above, briefly and in a natural tone. Do not invite unrelated tasks, logging,
+recipes, tips, or “let me know if you need anything else” — no add-ons beyond the
+reminder itself."""
 
 
 class TelegramHandler:

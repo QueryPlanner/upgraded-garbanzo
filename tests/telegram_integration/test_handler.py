@@ -509,7 +509,7 @@ class TestProcessReminder:
             datetime(2026, 3, 19, 15, 30, tzinfo=UTC).isoformat(timespec="seconds")
         )
         assert expected_local in captured_message
-        assert "[REMINDER NOTIFICATION]" in captured_message
+        assert "[SCHEDULED REMINDER]" in captured_message
 
     @pytest.mark.asyncio
     async def test_uses_user_id_as_session_id(self, mock_agent: MagicMock) -> None:
@@ -605,4 +605,4 @@ class TestReminderPromptTemplate:
 
         assert "Test reminder" in result
         assert "2026-03-19 12:00 UTC" in result
-        assert "[REMINDER NOTIFICATION]" in result
+        assert "[SCHEDULED REMINDER]" in result
