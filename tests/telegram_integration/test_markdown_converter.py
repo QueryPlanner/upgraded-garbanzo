@@ -277,6 +277,14 @@ class TestValidateTelegramMarkup:
         """Unbalanced code block is invalid."""
         assert validate_telegram_markup("```python\ncode") is False
 
+    def test_unbalanced_strikethrough(self) -> None:
+        """Unbalanced strikethrough markup is invalid."""
+        assert validate_telegram_markup("~strikethrough") is False
+
+    def test_unbalanced_underline(self) -> None:
+        """Unbalanced underline markup is invalid."""
+        assert validate_telegram_markup("__underlined") is False
+
     def test_escaped_chars_ignored(self) -> None:
         """Escaped special characters don't affect validation."""
         assert validate_telegram_markup("Hello\\*world") is True

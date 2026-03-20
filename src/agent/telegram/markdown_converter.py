@@ -288,8 +288,9 @@ def convert_markdown_to_telegram(text: str) -> str:
 def validate_telegram_markup(text: str) -> bool:
     """Validate that Telegram MARKDOWN_V2 markup has balanced entities.
 
-    This checks that all formatting entities (bold, italic, underline,
-    strikethrough, code, links) are properly balanced.
+    Checks bold (*), italic (_), underline (__), strikethrough (~), inline
+    code (`), and fenced code blocks (```). Does not parse links
+    ([text](url)) or spoiler (||) spans.
 
     Args:
         text: Text in Telegram MARKDOWN_V2 format.
@@ -344,17 +345,16 @@ def validate_telegram_markup(text: str) -> bool:
             i += 2
             continue
 
-        # Check for single underscore (italic) - must not be part of __
-        if char == "_" and (i == 0 or text[i - 1] != "_"):
-            if i + 1 >= len(text) or text[i + 1] != "_":
-                italic_open = not italic_open
+        # Single underscore (italic); double underscore handled above
+        if char == "_":
+            italic_open = not italic_open
             i += 1
             continue
 
-        # Check for strikethrough (double tilde)
-        if text[i : i + 2] == "~~":
+        # Strikethrough uses single tilde in Telegram MARKDOWN_V2 (~text~)
+        if char == "~":
             strike_open = not strike_open
-            i += 2
+            i += 1
             continue
 
         # Check for bold (single asterisk in Telegram MARKDOWN_V2)
@@ -368,6 +368,10 @@ def validate_telegram_markup(text: str) -> bool:
 
     # All entities should be closed
     return not (
-        bold_open or italic_open or underline_open
-        or strike_open or code_open or code_block_open
+        bold_open
+        or italic_open
+        or underline_open
+        or strike_open
+        or code_open
+        or code_block_open
     )
