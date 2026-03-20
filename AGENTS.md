@@ -9,7 +9,7 @@
 *   **Framework:** Google ADK (`google-adk`)
 *   **Model Interface:** LiteLLM (supports Google, OpenRouter, etc.)
 *   **Server:** FastAPI
-*   **Database:** PostgreSQL (via `asyncpg`)
+*   **Database:** SQLite (reminders & fitness) · PostgreSQL optional (ADK sessions only)
 *   **Observability:** OpenTelemetry (OTel) with Langfuse support
 *   **Infrastructure:** Docker, Docker Compose
 
@@ -24,8 +24,8 @@
 1.  **Configure Environment:**
     Copy `.env.example` to `.env` and set the required variables:
     *   `AGENT_NAME`: Unique ID for the agent.
-    *   `DATABASE_URL`: Postgres connection string.
     *   `OPENROUTER_API_KEY` / `GOOGLE_API_KEY`: LLM API keys.
+    *   `DATABASE_URL` *(optional)*: Postgres URL — only needed if you want ADK conversation sessions persisted in Postgres. Reminders and fitness data always use local SQLite.
 
 2.  **Install Dependencies:**
     ```bash
@@ -96,7 +96,19 @@ Set `TELEGRAM_LATENCY_LOG=1` in `.env` for two INFO lines: `telegram.pre_llm_lat
 
 ### Session Persistence
 
-The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set and `ADK_USE_DATABASE_SESSION` is true (default), sessions are persisted in Postgres and survive restarts. Set `ADK_USE_DATABASE_SESSION=false` to use **in-memory** ADK sessions while keeping `DATABASE_URL` for reminders, fitness, and other app tables (avoids Postgres latency on every Telegram message). For deployed bots, set the same variable in your host or **GitHub Actions environment** (or deployment secrets) so it is injected at runtime without committing `.env`.
+The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set and `ADK_USE_DATABASE_SESSION` is true (default), ADK conversation sessions are persisted in Postgres and survive restarts. Set `ADK_USE_DATABASE_SESSION=false` to use **in-memory** ADK sessions (no Postgres latency per message). For deployed bots, set the same variable in your host or **GitHub Actions environment** (or deployment secrets) so it is injected at runtime without committing `.env`.
+
+### Data Persistence (Reminders & Fitness)
+
+Reminders and fitness data (calories, workouts) are stored in local SQLite files under the agent data directory (`src/agent/data/`). In Docker, this directory is mounted as a **named volume** (`agent_data`), which means data survives CI/CD redeployments automatically.
+
+| Command | Effect on data |
+| :--- | :--- |
+| `docker compose up -d` | ✅ Volumes preserved — safe to redeploy |
+| `docker compose down` | ✅ Volumes preserved — safe to stop |
+| `docker compose down -v` | ⚠️ **DESTROYS all volumes** — reminders, fitness data, ADK artifacts, and context files are permanently deleted |
+
+Never run `docker compose down -v` unless you intentionally want to wipe all agent data.
 
 ## Development Conventions
 

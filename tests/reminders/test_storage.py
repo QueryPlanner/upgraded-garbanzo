@@ -20,7 +20,7 @@ async def storage() -> AsyncGenerator[ReminderStorage]:
     await storage.initialize()
     yield storage
 
-    # Cleanup
+    await storage.close()
     db_path.unlink(missing_ok=True)
 
 
@@ -57,7 +57,7 @@ class TestReminderStorage:
     @pytest.mark.asyncio
     async def test_initialize_creates_tables(self, storage: ReminderStorage) -> None:
         """Test that initialize creates the database tables."""
-        assert storage._initialized is True
+        assert storage._conn is not None
         assert storage.db_path.exists()
 
     @pytest.mark.asyncio
