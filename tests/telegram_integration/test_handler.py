@@ -84,8 +84,9 @@ class TestTelegramHandler:
         """Test that existing session is used when available."""
         handler = TelegramHandler(mock_agent, app_name="test-app")
 
-        # Mock existing session
+        # Mock existing session with user_id in state
         existing_session = MagicMock(id="existing-session")
+        existing_session.state = {"user_id": "user-1"}
 
         with patch.object(
             handler.runner.session_service, "get_session", new_callable=AsyncMock
@@ -106,6 +107,59 @@ class TestTelegramHandler:
 
             assert response == "Response"
             mock_get.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_process_message_recreates_session_missing_user_id(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test that existing session missing user_id in state gets recreated."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        # Mock existing session without user_id in state
+        existing_session = MagicMock()
+        existing_session.state = {}  # Missing user_id
+
+        # Mock recreated session with user_id in state
+        recreated_session = MagicMock()
+        recreated_session.state = {"user_id": "user-1"}
+
+        with (
+            patch.object(
+                handler.runner.session_service, "get_session", new_callable=AsyncMock
+            ) as mock_get,
+            patch.object(
+                handler.runner.session_service, "delete_session", new_callable=AsyncMock
+            ) as mock_delete,
+            patch.object(
+                handler.runner.session_service, "create_session", new_callable=AsyncMock
+            ) as mock_create,
+        ):
+            mock_get.return_value = existing_session
+            mock_create.return_value = recreated_session
+
+            async def mock_run_async(**kwargs: object) -> object:
+                yield MagicMock(
+                    content=types.Content(
+                        role="model", parts=[types.Part(text="Response")]
+                    )
+                )
+
+            with patch.object(handler.runner, "run_async", mock_run_async):
+                response = await handler.process_message("user-1", "Hello")
+
+            assert response == "Response"
+            mock_get.assert_called_once()
+            mock_delete.assert_called_once_with(
+                app_name="test-app",
+                user_id="user-1",
+                session_id="user-1",
+            )
+            mock_create.assert_called_once_with(
+                app_name="test-app",
+                user_id="user-1",
+                session_id="user-1",
+                state={"user_id": "user-1"},
+            )
 
     @pytest.mark.asyncio
     async def test_process_message_concatenates_multiple_parts(
