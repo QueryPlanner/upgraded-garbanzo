@@ -222,6 +222,7 @@ class TestEdgeCases:
         assert "\\{" in result
         assert "\\}" in result
         assert "\\-" in result
+        assert "\\\\text" in result
 
     def test_newlines_preserved(self) -> None:
         """Newlines are preserved."""
