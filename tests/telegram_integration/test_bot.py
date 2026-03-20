@@ -8,7 +8,6 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from agent.telegram.bot import (
-    _normalize_telegram_response_text,
     _render_markdown_as_html,
     _send_long_message,
     _send_validated_chunk,
@@ -357,14 +356,14 @@ class TestHandleMessage:
             second_call = mock_update.message.reply_text.call_args_list[1]
 
             assert first_call.kwargs["parse_mode"] == ParseMode.HTML
-            assert second_call.args[0] == "((1-tax rate))"
+            assert second_call.args[0] == r"\((1-\text{tax rate})\)"
             assert "parse_mode" not in second_call.kwargs
 
     @pytest.mark.asyncio
-    async def test_normalizes_latex_style_math_before_sending(
+    async def test_passes_latex_style_text_through_without_dropping_reply(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:
-        """LaTeX-style math should be simplified before Telegram delivery."""
+        """LaTeX-style text should still be delivered as plain visible text."""
         response = (
             r"\["
             r"\text{After-tax cost of debt} = "
@@ -382,12 +381,8 @@ class TestHandleMessage:
 
             sent_text = mock_update.message.reply_text.call_args.args[0]
 
-            assert "After-tax cost of debt" in sent_text
+            assert r"\text{After-tax cost of debt}" in sent_text
             assert "interest rate" in sent_text
-            assert " x " in sent_text
-            assert "underbrace" not in sent_text
-            assert "Bigl" not in sent_text
-            assert "text{" not in sent_text
             assert mock_update.message.reply_text.call_args.kwargs["parse_mode"] == (
                 ParseMode.HTML
             )
@@ -523,33 +518,7 @@ class TestRenderMarkdownAsHtml:
         assert "<b>cost of debt</b>" in result
         assert "<code>6%</code>" in result
         assert '<a href="https://example.com">details</a>' in result
-        assert "((1-tax rate))" in result
-
-
-class TestNormalizeTelegramResponseText:
-    """Tests for Telegram response normalization."""
-
-    def test_simplifies_common_latex_markup(self) -> None:
-        """Common LaTeX wrappers should become readable text."""
-        text = (
-            r"\["
-            r"\text{After-tax cost of debt} = "
-            r"\underbrace{r_{\text{pre}}}{\text{interest rate}} "
-            r"\times \Bigl(1 - T\Bigr)"
-            r"\]"
-        )
-
-        result = _normalize_telegram_response_text(text)
-
-        assert result == "After-tax cost of debt = r_{pre} (interest rate) x (1 - T)"
-
-    def test_simplifies_fraction_and_inline_math(self) -> None:
-        """Fractions and inline math delimiters should be unwrapped."""
-        text = r"The ratio is \(\frac{a}{b}\) and \text{stays readable}."
-
-        result = _normalize_telegram_response_text(text)
-
-        assert result == "The ratio is ((a / b)) and stays readable."
+        assert r"\((1-\text{tax rate})\)" in result
 
 
 class TestSplitAndSend:

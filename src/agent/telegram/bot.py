@@ -60,78 +60,6 @@ logger = logging.getLogger(__name__)
 # Bot configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_MESSAGE_LENGTH = 4096  # Telegram's message limit
-LATEX_GROUP_PATTERN = r"([^{}]+(?:\{[^{}]+\}[^{}]*)*)"
-
-
-def _normalize_latex_commands(text: str) -> str:
-    """Convert common LaTeX-style math commands into readable plain text."""
-    normalized_text = text
-
-    replacements = {
-        r"\times": " x ",
-        r"\cdot": " * ",
-        r"\Bigl": "",
-        r"\Bigr": "",
-        r"\bigl": "",
-        r"\bigr": "",
-        r"\Big": "",
-        r"\big": "",
-        r"\left": "",
-        r"\right": "",
-    }
-
-    for source, replacement in replacements.items():
-        normalized_text = normalized_text.replace(source, replacement)
-
-    return normalized_text
-
-
-def _unwrap_latex_group(text: str, command_name: str) -> str:
-    """Replace a LaTeX command that wraps a single group with its content."""
-    pattern = re.compile(rf"\\{command_name}\s*\{{([^{{}}]+)\}}")
-
-    previous_text = None
-    normalized_text = text
-    while previous_text != normalized_text:
-        previous_text = normalized_text
-        normalized_text = pattern.sub(r"\1", normalized_text)
-
-    return normalized_text
-
-
-def _normalize_telegram_response_text(text: str) -> str:
-    """Prepare agent text for Telegram where LaTeX rendering is unavailable."""
-    normalized_text = text
-
-    normalized_text = normalized_text.replace(r"\[", "").replace(r"\]", "")
-    normalized_text = normalized_text.replace(r"\(", "(").replace(r"\)", ")")
-    normalized_text = _normalize_latex_commands(normalized_text)
-
-    for command_name in ("text", "mathrm", "operatorname", "mathit", "mathbf"):
-        normalized_text = _unwrap_latex_group(normalized_text, command_name)
-
-    normalized_text = re.sub(
-        r"\\underbrace\s*\{([^{}]+(?:_\{[^{}]+\})?)\}\s*\{([^{}]+)\}",
-        r"\1 (\2)",
-        normalized_text,
-    )
-    normalized_text = re.sub(
-        r"\\overbrace\s*\{([^{}]+(?:_\{[^{}]+\})?)\}\s*\{([^{}]+)\}",
-        r"\1 (\2)",
-        normalized_text,
-    )
-    normalized_text = re.sub(
-        rf"\\frac\s*\{{{LATEX_GROUP_PATTERN}\}}\s*\{{{LATEX_GROUP_PATTERN}\}}",
-        r"(\1 / \2)",
-        normalized_text,
-    )
-
-    normalized_text = normalized_text.replace(r"\{", "{").replace(r"\}", "}")
-    normalized_text = normalized_text.replace(r"\_", "_").replace(r"\%", "%")
-    normalized_text = re.sub(r"[ \t]+", " ", normalized_text)
-    normalized_text = re.sub(r"\n{3,}", "\n\n", normalized_text)
-
-    return normalized_text.strip()
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -266,16 +194,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
-        normalized_response = _normalize_telegram_response_text(response)
-
-        telegram_response = _render_markdown_as_html(normalized_response)
+        telegram_response = _render_markdown_as_html(response)
 
         # Split long messages if needed (Telegram has 4096 char limit)
         if len(telegram_response) <= MAX_MESSAGE_LENGTH:
             await _send_validated_chunk(
                 message=update.message,
                 chunk=telegram_response,
-                fallback_text=normalized_response,
+                fallback_text=response,
             )
         else:
             # Split into chunks at natural boundaries when possible
@@ -362,33 +288,9 @@ def _render_html_as_plain_text(text: str) -> str:
     return plain_text
 
 
-def _normalize_markdown_fallback_text(text: str) -> str:
-    """Normalize markdown and LaTeX-like text for fallback rendering.
-
-    The goal is to keep the message readable when Telegram rejects
-    MARKDOWN_V2 formatting.
-    """
-    normalized_text = text
-
-    normalized_text = re.sub(
-        r"```[^\n]*\n([\s\S]*?)```",
-        lambda match: match.group(1).strip(),
-        normalized_text,
-    )
-    normalized_text = re.sub(r"\\text\s*\{([^{}]+)\}", r"\1", normalized_text)
-    normalized_text = normalized_text.replace(r"\[", "[").replace(r"\]", "]")
-    normalized_text = normalized_text.replace(r"\(", "(").replace(r"\)", ")")
-    normalized_text = normalized_text.replace(r"\{", "{").replace(r"\}", "}")
-    normalized_text = normalized_text.replace(r"\%", "%")
-    normalized_text = normalized_text.replace(r"\-", "-")
-
-    return normalized_text.strip()
-
-
 def _render_markdown_as_html(text: str) -> str:
     """Convert common markdown patterns into Telegram-safe HTML."""
-    normalized_text = _normalize_markdown_fallback_text(text)
-    escaped_text = html.escape(normalized_text)
+    escaped_text = html.escape(text)
 
     escaped_text = re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
@@ -433,7 +335,7 @@ async def _send_validated_chunk(
         fallback_text: Original markdown version to send if HTML fails.
     """
     if fallback_text is not None:
-        plain_text = _normalize_telegram_response_text(fallback_text)
+        plain_text = fallback_text
     else:
         plain_text = _render_html_as_plain_text(chunk)
 
