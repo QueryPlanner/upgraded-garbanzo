@@ -69,41 +69,28 @@ class FitnessStorage:
         start_date: str | None,
         end_date: str | None,
     ) -> list[Any]:
+        """Fetch calorie rows from Postgres with optional date filters."""
         sel = (
             "SELECT id, user_id, date, food_item, calories, protein, carbs, fat, "
             "meal_type, notes, created_at FROM agent_calories"
         )
         order = " ORDER BY date DESC, created_at DESC"
-        has_start = start_date is not None
-        has_end = end_date is not None
-        if not has_start and not has_end:
-            return _as_row_list(
-                await pool.fetch(sel + " WHERE user_id = $1" + order, user_id)
-            )
-        if has_start and has_end:
-            return _as_row_list(
-                await pool.fetch(
-                    sel + " WHERE user_id = $1 AND date >= $2 AND date <= $3" + order,
-                    user_id,
-                    start_date,
-                    end_date,
-                )
-            )
-        if has_start:
-            return _as_row_list(
-                await pool.fetch(
-                    sel + " WHERE user_id = $1 AND date >= $2" + order,
-                    user_id,
-                    start_date,
-                )
-            )
-        return _as_row_list(
-            await pool.fetch(
-                sel + " WHERE user_id = $1 AND date <= $2" + order,
-                user_id,
-                end_date,
-            )
-        )
+
+        conditions = ["user_id = $1"]
+        params: list[str] = [user_id]
+        param_idx = 2
+
+        if start_date:
+            conditions.append(f"date >= ${param_idx}")
+            params.append(start_date)
+            param_idx += 1
+        if end_date:
+            conditions.append(f"date <= ${param_idx}")
+            params.append(end_date)
+
+        where_clause = " AND ".join(conditions)
+        query = f"{sel} WHERE {where_clause}{order}"
+        return _as_row_list(await pool.fetch(query, *params))
 
     async def _fetch_workout_rows_postgres(
         self,
@@ -113,85 +100,33 @@ class FitnessStorage:
         end_date: str | None,
         exercise_type: str | None,
     ) -> list[Any]:
+        """Fetch workout rows from Postgres with optional filters."""
         sel = (
             "SELECT id, user_id, date, exercise_type, exercise_name, "
             "duration_minutes, sets, reps, weight, distance_km, notes, created_at "
             "FROM agent_workouts"
         )
         order = " ORDER BY date DESC, created_at DESC"
-        hs = start_date is not None
-        he = end_date is not None
-        hx = exercise_type is not None
 
-        if not hs and not he and not hx:
-            return _as_row_list(
-                await pool.fetch(sel + " WHERE user_id = $1" + order, user_id)
-            )
-        if not hs and not he and hx:
-            return _as_row_list(
-                await pool.fetch(
-                    sel + " WHERE user_id = $1 AND exercise_type = $2" + order,
-                    user_id,
-                    exercise_type,
-                )
-            )
-        if hs and not he and not hx:
-            return _as_row_list(
-                await pool.fetch(
-                    sel + " WHERE user_id = $1 AND date >= $2" + order,
-                    user_id,
-                    start_date,
-                )
-            )
-        if hs and not he and hx:
-            return _as_row_list(
-                await pool.fetch(
-                    sel
-                    + " WHERE user_id = $1 AND date >= $2 AND exercise_type = $3"
-                    + order,
-                    user_id,
-                    start_date,
-                    exercise_type,
-                )
-            )
-        if not hs and he and not hx:
-            return _as_row_list(
-                await pool.fetch(
-                    sel + " WHERE user_id = $1 AND date <= $2" + order,
-                    user_id,
-                    end_date,
-                )
-            )
-        if not hs and he and hx:
-            return _as_row_list(
-                await pool.fetch(
-                    sel
-                    + " WHERE user_id = $1 AND date <= $2 AND exercise_type = $3"
-                    + order,
-                    user_id,
-                    end_date,
-                    exercise_type,
-                )
-            )
-        if hs and he and not hx:
-            return _as_row_list(
-                await pool.fetch(
-                    sel + " WHERE user_id = $1 AND date >= $2 AND date <= $3" + order,
-                    user_id,
-                    start_date,
-                    end_date,
-                )
-            )
-        return _as_row_list(
-            await pool.fetch(
-                sel + " WHERE user_id = $1 AND date >= $2 AND date <= $3 "
-                "AND exercise_type = $4" + order,
-                user_id,
-                start_date,
-                end_date,
-                exercise_type,
-            )
-        )
+        conditions = ["user_id = $1"]
+        params: list[str | None] = [user_id]
+        param_idx = 2
+
+        if start_date:
+            conditions.append(f"date >= ${param_idx}")
+            params.append(start_date)
+            param_idx += 1
+        if end_date:
+            conditions.append(f"date <= ${param_idx}")
+            params.append(end_date)
+            param_idx += 1
+        if exercise_type:
+            conditions.append(f"exercise_type = ${param_idx}")
+            params.append(exercise_type)
+
+        where_clause = " AND ".join(conditions)
+        query = f"{sel} WHERE {where_clause}{order}"
+        return _as_row_list(await pool.fetch(query, *params))
 
     async def initialize(self) -> None:
         async with self._lock:
@@ -318,6 +253,16 @@ class FitnessStorage:
             conn.close()
 
     async def add_calorie_entry(self, entry: CalorieEntry) -> int:
+        """Add a new calorie entry to the database.
+
+        The entry is added to Postgres if configured, otherwise to SQLite.
+
+        Args:
+            entry: The calorie entry to add.
+
+        Returns:
+            The ID of the newly created entry.
+        """
         await self.initialize()
 
         if self._use_postgres:
@@ -361,6 +306,7 @@ class FitnessStorage:
         return eid
 
     def _add_calorie_entry_sqlite(self, entry: CalorieEntry) -> int:
+        """Synchronous implementation to add a calorie entry to SQLite."""
         conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
@@ -421,6 +367,7 @@ class FitnessStorage:
         start_date: str | None,
         end_date: str | None,
     ) -> list[CalorieEntry]:
+        """Synchronous implementation to get calorie entries from SQLite."""
         conn = self._get_sqlite_connection()
         try:
             query = "SELECT * FROM calories WHERE user_id = ?"
@@ -476,6 +423,16 @@ class FitnessStorage:
         }
 
     async def add_workout_entry(self, entry: WorkoutEntry) -> int:
+        """Add a new workout entry to the database.
+
+        The entry is added to Postgres if configured, otherwise to SQLite.
+
+        Args:
+            entry: The workout entry to add.
+
+        Returns:
+            The ID of the newly created entry.
+        """
         await self.initialize()
 
         if self._use_postgres:
@@ -519,6 +476,7 @@ class FitnessStorage:
         return eid
 
     def _add_workout_entry_sqlite(self, entry: WorkoutEntry) -> int:
+        """Synchronous implementation to add a workout entry to SQLite."""
         conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
@@ -583,6 +541,7 @@ class FitnessStorage:
         end_date: str | None,
         exercise_type: str | None,
     ) -> list[WorkoutEntry]:
+        """Synchronous implementation to get workout entries from SQLite."""
         conn = self._get_sqlite_connection()
         try:
             query = "SELECT * FROM workouts WHERE user_id = ?"
@@ -652,6 +611,18 @@ class FitnessStorage:
         }
 
     async def delete_entry(self, entry_type: str, entry_id: int, user_id: str) -> bool:
+        """Delete a calorie or workout entry.
+
+        Deletes the entry from Postgres if configured, otherwise from SQLite.
+
+        Args:
+            entry_type: Either "calorie" or "workout".
+            entry_id: The ID of the entry to delete.
+            user_id: The user ID (for authorization check).
+
+        Returns:
+            True if deleted, False if not found or not authorized.
+        """
         await self.initialize()
 
         if entry_type not in ("calorie", "workout"):
@@ -694,6 +665,7 @@ class FitnessStorage:
     def _delete_entry_sqlite(
         self, entry_type: str, entry_id: int, user_id: str
     ) -> bool:
+        """Synchronous implementation to delete an entry from SQLite."""
         valid_tables = {"calorie": "calories", "workout": "workouts"}
         if entry_type not in valid_tables:
             return False
@@ -709,6 +681,7 @@ class FitnessStorage:
             conn.close()
 
     def _sqlite_row_to_calorie_entry(self, row: sqlite3.Row) -> CalorieEntry:
+        """Convert a SQLite database row to a CalorieEntry object."""
         return CalorieEntry(
             id=row["id"],
             user_id=row["user_id"],
@@ -724,6 +697,7 @@ class FitnessStorage:
         )
 
     def _record_to_calorie_entry(self, row: asyncpg.Record) -> CalorieEntry:
+        """Convert an asyncpg record to a CalorieEntry object."""
         return CalorieEntry(
             id=row["id"],
             user_id=row["user_id"],
@@ -739,6 +713,7 @@ class FitnessStorage:
         )
 
     def _sqlite_row_to_workout_entry(self, row: sqlite3.Row) -> WorkoutEntry:
+        """Convert a SQLite database row to a WorkoutEntry object."""
         return WorkoutEntry(
             id=row["id"],
             user_id=row["user_id"],
@@ -755,6 +730,7 @@ class FitnessStorage:
         )
 
     def _record_to_workout_entry(self, row: asyncpg.Record) -> WorkoutEntry:
+        """Convert an asyncpg record to a WorkoutEntry object."""
         return WorkoutEntry(
             id=row["id"],
             user_id=row["user_id"],
@@ -775,6 +751,11 @@ _storage: FitnessStorage | None = None
 
 
 def get_fitness_storage() -> FitnessStorage:
+    """Get the global fitness storage instance.
+
+    Returns:
+        The global FitnessStorage instance.
+    """
     global _storage
     if _storage is None:
         _storage = FitnessStorage()

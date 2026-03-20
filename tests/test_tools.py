@@ -234,7 +234,7 @@ class TestScheduleReminder:
         )
 
         assert result["status"] == "error"
-        assert "time format" in result["message"].lower()
+        assert "could not understand the time" in result["message"].lower()
 
     @pytest.mark.asyncio
     async def test_successful_schedule(self) -> None:

@@ -154,7 +154,16 @@ class ReminderStorage:
             conn.close()
 
     async def add_reminder(self, reminder: Reminder) -> int:
-        """Add a reminder; returns new row id."""
+        """Add a new reminder to the database.
+
+        The reminder is added to Postgres if configured, otherwise to SQLite.
+
+        Args:
+            reminder: The reminder to add.
+
+        Returns:
+            The ID of the newly created reminder.
+        """
         await self.initialize()
 
         if self._use_postgres:
@@ -190,6 +199,7 @@ class ReminderStorage:
         return rid
 
     def _add_reminder_sqlite(self, reminder: Reminder) -> int:
+        """Synchronous implementation to add a reminder to SQLite."""
         conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
@@ -212,7 +222,14 @@ class ReminderStorage:
             conn.close()
 
     async def get_due_reminders(self) -> list[Reminder]:
-        """Reminders with trigger_time <= now and not yet sent."""
+        """Get all reminders that are due to be sent.
+
+        Fetches reminders with `trigger_time <= now` and `is_sent = FALSE`
+        from the configured persistence backend.
+
+        Returns:
+            List of due Reminder objects.
+        """
         await self.initialize()
         now = now_utc().isoformat(timespec="seconds")
 
@@ -236,6 +253,7 @@ class ReminderStorage:
         return await loop.run_in_executor(None, self._get_due_reminders_sqlite, now)
 
     def _get_due_reminders_sqlite(self, now: str) -> list[Reminder]:
+        """Synchronous implementation to get due reminders from SQLite."""
         conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
@@ -253,7 +271,14 @@ class ReminderStorage:
             conn.close()
 
     async def mark_sent(self, reminder_id: int) -> None:
-        """Mark a reminder as sent."""
+        """Mark a reminder as sent.
+
+        Updates the `is_sent` status for the given reminder ID in the
+        configured persistence backend.
+
+        Args:
+            reminder_id: The ID of the reminder to mark as sent.
+        """
         await self.initialize()
 
         if self._use_postgres:
@@ -272,6 +297,7 @@ class ReminderStorage:
         logger.info("Marked reminder %s as sent", reminder_id)
 
     def _mark_sent_sqlite(self, reminder_id: int) -> None:
+        """Synchronous implementation to mark a reminder as sent in SQLite."""
         conn = self._get_sqlite_connection()
         try:
             conn.execute(
@@ -285,7 +311,18 @@ class ReminderStorage:
     async def get_user_reminders(
         self, user_id: str, include_sent: bool = False
     ) -> list[Reminder]:
-        """List reminders for one user."""
+        """Get all reminders for a specific user.
+
+        Fetches reminders for the given user ID from the configured
+        persistence backend.
+
+        Args:
+            user_id: The Telegram chat ID of the user.
+            include_sent: Whether to include already-sent reminders.
+
+        Returns:
+            List of the user's reminders.
+        """
         await self.initialize()
 
         if self._use_postgres:
@@ -323,6 +360,7 @@ class ReminderStorage:
     def _get_user_reminders_sqlite(
         self, user_id: str, include_sent: bool
     ) -> list[Reminder]:
+        """Synchronous implementation to get user reminders from SQLite."""
         conn = self._get_sqlite_connection()
         try:
             if include_sent:
@@ -351,7 +389,17 @@ class ReminderStorage:
             conn.close()
 
     async def delete_reminder(self, reminder_id: int, user_id: str) -> bool:
-        """Delete a reminder if it belongs to the user."""
+        """Delete a reminder if it belongs to the user.
+
+        Deletes the reminder from Postgres if configured, otherwise from SQLite.
+
+        Args:
+            reminder_id: The ID of the reminder to delete.
+            user_id: The user ID (for authorization check).
+
+        Returns:
+            True if deleted, False if not found or not authorized.
+        """
         await self.initialize()
 
         if self._use_postgres:
@@ -379,6 +427,7 @@ class ReminderStorage:
         return deleted
 
     def _delete_reminder_sqlite(self, reminder_id: int, user_id: str) -> bool:
+        """Synchronous implementation to delete a reminder from SQLite."""
         conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
@@ -391,6 +440,7 @@ class ReminderStorage:
             conn.close()
 
     def _sqlite_row_to_reminder(self, row: sqlite3.Row) -> Reminder:
+        """Convert a SQLite database row to a Reminder object."""
         return Reminder(
             id=row["id"],
             user_id=row["user_id"],
@@ -401,6 +451,7 @@ class ReminderStorage:
         )
 
     def _record_to_reminder(self, row: asyncpg.Record) -> Reminder:
+        """Convert an asyncpg record to a Reminder object."""
         return Reminder(
             id=row["id"],
             user_id=row["user_id"],
@@ -415,7 +466,11 @@ _storage: ReminderStorage | None = None
 
 
 def get_storage() -> ReminderStorage:
-    """Singleton ReminderStorage for the process."""
+    """Get the global reminder storage instance.
+
+    Returns:
+        The global ReminderStorage instance.
+    """
     global _storage
     if _storage is None:
         _storage = ReminderStorage()
