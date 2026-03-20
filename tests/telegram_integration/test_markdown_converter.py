@@ -5,6 +5,7 @@ from agent.telegram.markdown_converter import (
     _escape_special_chars,
     _find_formatting_spans,
     convert_markdown_to_telegram,
+    validate_telegram_markup,
 )
 
 
@@ -223,3 +224,76 @@ class TestEdgeCases:
         result = convert_markdown_to_telegram("Visit https://example.com")
         # The . in the URL gets escaped for Telegram MARKDOWN_V2
         assert "https://example\\.com" in result
+
+
+class TestValidateTelegramMarkup:
+    """Tests for markup validation."""
+
+    def test_valid_plain_text(self) -> None:
+        """Plain text with no formatting is valid."""
+        assert validate_telegram_markup("Hello world") is True
+
+    def test_valid_bold(self) -> None:
+        """Balanced bold markup is valid."""
+        assert validate_telegram_markup("*bold text*") is True
+
+    def test_valid_italic(self) -> None:
+        """Balanced italic markup is valid."""
+        assert validate_telegram_markup("_italic text_") is True
+
+    def test_valid_underline(self) -> None:
+        """Balanced underline markup is valid."""
+        assert validate_telegram_markup("__underlined__") is True
+
+    def test_valid_strikethrough(self) -> None:
+        """Balanced strikethrough markup is valid."""
+        assert validate_telegram_markup("~strikethrough~") is True
+
+    def test_valid_inline_code(self) -> None:
+        """Balanced inline code is valid."""
+        assert validate_telegram_markup("`code`") is True
+
+    def test_valid_code_block(self) -> None:
+        """Balanced code block is valid."""
+        assert validate_telegram_markup("```python\nprint('hi')\n```") is True
+
+    def test_valid_mixed_formatting(self) -> None:
+        """Mixed balanced formatting is valid."""
+        assert validate_telegram_markup("*bold* and _italic_") is True
+
+    def test_unbalanced_bold(self) -> None:
+        """Unbalanced bold markup is invalid."""
+        assert validate_telegram_markup("*bold text") is False
+
+    def test_unbalanced_italic(self) -> None:
+        """Unbalanced italic markup is invalid."""
+        assert validate_telegram_markup("_italic text") is False
+
+    def test_unbalanced_code(self) -> None:
+        """Unbalanced code markup is invalid."""
+        assert validate_telegram_markup("`code") is False
+
+    def test_unbalanced_code_block(self) -> None:
+        """Unbalanced code block is invalid."""
+        assert validate_telegram_markup("```python\ncode") is False
+
+    def test_unbalanced_strikethrough(self) -> None:
+        """Unbalanced strikethrough markup is invalid."""
+        assert validate_telegram_markup("~strikethrough") is False
+
+    def test_unbalanced_underline(self) -> None:
+        """Unbalanced underline markup is invalid."""
+        assert validate_telegram_markup("__underlined") is False
+
+    def test_escaped_chars_ignored(self) -> None:
+        """Escaped special characters don't affect validation."""
+        assert validate_telegram_markup("Hello\\*world") is True
+
+    def test_nested_formatting(self) -> None:
+        """Nested formatting that's balanced is valid."""
+        # Bold containing italic - both closed properly
+        assert validate_telegram_markup("*bold with _italic_ inside*") is True
+
+    def test_multiple_bold_sections(self) -> None:
+        """Multiple separate bold sections are valid."""
+        assert validate_telegram_markup("*first* and *second*") is True

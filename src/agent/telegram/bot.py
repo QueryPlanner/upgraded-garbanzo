@@ -36,7 +36,7 @@ from telegram.ext import (
 # Load environment variables from .env file
 load_dotenv()
 
-from ..agent import app, root_agent  # noqa: E402
+from ..agent import app  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
 from ..utils.session import create_session_service_for_runner  # noqa: E402
 from .handler import (  # noqa: E402
@@ -45,7 +45,10 @@ from .handler import (  # noqa: E402
     process_message,
     reset_session,
 )
-from .markdown_converter import convert_markdown_to_telegram  # noqa: E402
+from .markdown_converter import (  # noqa: E402
+    convert_markdown_to_telegram,
+    validate_telegram_markup,
+)
 from .notifications import get_notification_service  # noqa: E402
 
 # Configure logging
@@ -241,7 +244,8 @@ async def _send_long_message(message: Message, text: str) -> None:
     """Send a long message by splitting it at natural boundaries.
 
     This function attempts to split messages at paragraph breaks, newlines,
-    or sentence boundaries to preserve formatting and readability.
+    or sentence boundaries to preserve formatting and readability. It validates
+    each chunk to ensure Telegram markup is balanced.
 
     Args:
         message: The Telegram message object to reply to.
@@ -257,10 +261,8 @@ async def _send_long_message(message: Message, text: str) -> None:
             current_chunk
             and len(current_chunk) + 2 + len(paragraph) > MAX_MESSAGE_LENGTH
         ):
-            # Send current chunk
-            await message.reply_text(
-                current_chunk.strip(), parse_mode=ParseMode.MARKDOWN_V2
-            )
+            # Send current chunk (validated)
+            await _send_validated_chunk(message, current_chunk.strip())
             current_chunk = paragraph
         elif current_chunk:
             current_chunk += "\n\n" + paragraph
@@ -270,12 +272,29 @@ async def _send_long_message(message: Message, text: str) -> None:
     # Send remaining content
     if current_chunk:
         if len(current_chunk) <= MAX_MESSAGE_LENGTH:
-            await message.reply_text(
-                current_chunk.strip(), parse_mode=ParseMode.MARKDOWN_V2
-            )
+            await _send_validated_chunk(message, current_chunk.strip())
         else:
             # Fallback: split at single newlines or character boundaries
             await _split_and_send(message, current_chunk)
+
+
+async def _send_validated_chunk(message: Message, chunk: str) -> None:
+    """Send a chunk after validating its markup.
+
+    If the chunk has unbalanced markup entities, send without parse_mode
+    to avoid Telegram API errors.
+
+    Args:
+        message: The Telegram message object to reply to.
+        chunk: The text chunk to send.
+    """
+    if validate_telegram_markup(chunk):
+        await message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
+    else:
+        # Markup is unbalanced - send without formatting to avoid errors
+        logger.warning("Unbalanced markup detected, sending without formatting")
+        # Strip formatting by sending without parse_mode
+        await message.reply_text(chunk)
 
 
 async def _split_and_send(message: Message, text: str) -> None:
@@ -289,9 +308,7 @@ async def _split_and_send(message: Message, text: str) -> None:
 
     while remaining:  # pragma: no branch
         if len(remaining) <= MAX_MESSAGE_LENGTH:
-            await message.reply_text(
-                remaining.strip(), parse_mode=ParseMode.MARKDOWN_V2
-            )
+            await _send_validated_chunk(message, remaining.strip())
             break
 
         # Try to find a good split point
@@ -309,7 +326,7 @@ async def _split_and_send(message: Message, text: str) -> None:
 
         chunk = remaining[:split_point].strip()
         if chunk:
-            await message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
+            await _send_validated_chunk(message, chunk)
         remaining = remaining[split_point:]
 
 
