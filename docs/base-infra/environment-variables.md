@@ -7,9 +7,9 @@ Complete reference for all environment variables used in this project.
 ### Database
 
 **DATABASE_URL**
-- **When:** Always required
+- **When:** Required for production (sessions, reminders, fitness on Postgres)
 - **Value:** Postgres connection string (e.g., `postgresql://user:pass@localhost:5432/dbname`)
-- **Purpose:** Persistent storage for agent sessions and memory
+- **Purpose:** ADK session storage plus app tables `agent_reminders`, `agent_calories`, and `agent_workouts` (created on startup). Without it, sessions may be in-memory only and reminders/fitness use SQLite under the agent data directory.
 
 ### API Keys
 

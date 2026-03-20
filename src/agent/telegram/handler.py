@@ -5,7 +5,7 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from google.adk.agents import LlmAgent
@@ -16,22 +16,25 @@ from google.adk.runners import InMemoryRunner, Runner
 from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai import types
 
+from ..utils.app_timezone import format_stored_instant_for_display
+
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
 
 # Template for injecting reminders into the agent's context
-REMINDER_PROMPT_TEMPLATE = """[REMINDER NOTIFICATION]
+REMINDER_PROMPT_TEMPLATE = """[SCHEDULED REMINDER]
 
-You previously asked me to remind you about the following:
+Send the user a short message that delivers only this reminder (scheduled for
+{scheduled_time}):
 
 "{reminder_message}"
 
-This reminder was scheduled for {scheduled_time}.
-
-Please acknowledge this reminder in a helpful and personalized way.
-If appropriate, you can offer to help with any related tasks."""
+Rules: Your reply is what they see in Telegram. Stay on-topic: remind them of the
+above, briefly and in a natural tone. Do not invite unrelated tasks, logging,
+recipes, tips, or “let me know if you need anything else” — no add-ons beyond the
+reminder itself."""
 
 
 class TelegramHandler:
@@ -263,8 +266,11 @@ class TelegramHandler:
         Returns:
             The agent's personalized response to the reminder.
         """
-        # Format the scheduled time for display
-        time_str = scheduled_time.strftime("%Y-%m-%d %H:%M UTC")
+        if scheduled_time.tzinfo is None:
+            scheduled_time = scheduled_time.replace(tzinfo=UTC)
+        time_str = format_stored_instant_for_display(
+            scheduled_time.astimezone(UTC).isoformat(timespec="seconds")
+        )
 
         # Create the reminder prompt using the template
         prompt = REMINDER_PROMPT_TEMPLATE.format(

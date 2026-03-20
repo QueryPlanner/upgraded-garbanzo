@@ -16,6 +16,7 @@ from agent.telegram.handler import (
     process_message,
     reset_session,
 )
+from agent.utils.app_timezone import format_stored_instant_for_display
 
 
 @pytest.fixture
@@ -502,11 +503,13 @@ class TestProcessReminder:
                 scheduled_time=datetime(2026, 3, 19, 15, 30, tzinfo=UTC),
             )
 
-        # Verify the prompt contains the reminder message and time
         assert captured_message is not None
         assert "take a break" in captured_message
-        assert "2026-03-19 15:30" in captured_message
-        assert "[REMINDER NOTIFICATION]" in captured_message
+        expected_local = format_stored_instant_for_display(
+            datetime(2026, 3, 19, 15, 30, tzinfo=UTC).isoformat(timespec="seconds")
+        )
+        assert expected_local in captured_message
+        assert "[SCHEDULED REMINDER]" in captured_message
 
     @pytest.mark.asyncio
     async def test_uses_user_id_as_session_id(self, mock_agent: MagicMock) -> None:
@@ -602,4 +605,4 @@ class TestReminderPromptTemplate:
 
         assert "Test reminder" in result
         assert "2026-03-19 12:00 UTC" in result
-        assert "[REMINDER NOTIFICATION]" in result
+        assert "[SCHEDULED REMINDER]" in result

@@ -1,81 +1,210 @@
-"""SQLite-based storage for fitness tracking (calories and workouts).
+"""Persistent fitness storage (Postgres or SQLite).
 
-This module provides persistent storage for fitness data that can survive
-agent restarts. Uses a single database with two tables.
+When DATABASE_URL points at Postgres, calories and workouts are stored there.
+Otherwise a local SQLite file under the agent data directory is used.
 """
 
 import asyncio
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+import asyncpg  # type: ignore[import-untyped]
 
 from ..utils.config import get_data_dir
+from ..utils.pg_app_pool import get_shared_app_pool, postgres_dsn_from_environment
 from .models import CalorieEntry, ExerciseType, MealType, WorkoutEntry
 
 logger = logging.getLogger(__name__)
 
 
+def _as_row_list(rows: object) -> list[Any]:
+    """Help mypy treat asyncpg fetch results as a list (asyncpg ships without stubs)."""
+    return cast(list[Any], rows)
+
+
 def _get_default_db_path() -> Path:
-    """Get the default database path in the agent data directory."""
+    """Get the default SQLite database path in the agent data directory."""
     return get_data_dir() / "fitness.db"
 
 
 class FitnessStorage:
-    """SQLite-based storage for fitness data.
-
-    This class provides CRUD operations for calories and workouts with proper
-    async handling using a dedicated thread.
-
-    Attributes:
-        db_path: Path to the SQLite database file.
-    """
+    """Storage for fitness data using Postgres (when configured) or SQLite."""
 
     def __init__(self, db_path: Path | None = None) -> None:
-        """Initialize the fitness storage.
+        """Initialize fitness storage.
 
         Args:
-            db_path: Optional path to SQLite database file.
-                Defaults to <agent_data_dir>/fitness.db
+            db_path: If set, always use SQLite at this path (e.g. tests).
+                If None, use Postgres when DATABASE_URL is a Postgres URL,
+                otherwise default SQLite under the agent data directory.
         """
-        self.db_path = db_path or _get_default_db_path()
+        self._explicit_sqlite = db_path is not None
+        self._sqlite_db_path = db_path or _get_default_db_path()
+        self._use_postgres = (not self._explicit_sqlite) and (
+            postgres_dsn_from_environment() is not None
+        )
+        self._pool: asyncpg.Pool | None = None
         self._lock = asyncio.Lock()
         self._initialized = False
 
+    @property
+    def db_path(self) -> Path:
+        """Path to the SQLite database file (meaningful only in SQLite mode)."""
+        return self._sqlite_db_path
+
     def _ensure_db_dir(self) -> None:
-        """Ensure the database directory exists."""
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._sqlite_db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a database connection with proper configuration.
-
-        Returns:
-            A configured SQLite connection.
-        """
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+    def _get_sqlite_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._sqlite_db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 
-    async def initialize(self) -> None:
-        """Initialize the database schema.
+    async def _fetch_calorie_rows_postgres(
+        self,
+        pool: asyncpg.Pool,
+        user_id: str,
+        start_date: str | None,
+        end_date: str | None,
+    ) -> list[Any]:
+        """Fetch calorie rows from Postgres with optional date filters."""
+        sel = (
+            "SELECT id, user_id, date, food_item, calories, protein, carbs, fat, "
+            "meal_type, notes, created_at FROM agent_calories"
+        )
+        order = " ORDER BY date DESC, created_at DESC"
 
-        Creates the calories and workouts tables if they don't exist.
-        """
+        conditions = ["user_id = $1"]
+        params: list[str] = [user_id]
+        param_idx = 2
+
+        if start_date:
+            conditions.append(f"date >= ${param_idx}")
+            params.append(start_date)
+            param_idx += 1
+        if end_date:
+            conditions.append(f"date <= ${param_idx}")
+            params.append(end_date)
+
+        where_clause = " AND ".join(conditions)
+        query = f"{sel} WHERE {where_clause}{order}"
+        return _as_row_list(await pool.fetch(query, *params))
+
+    async def _fetch_workout_rows_postgres(
+        self,
+        pool: asyncpg.Pool,
+        user_id: str,
+        start_date: str | None,
+        end_date: str | None,
+        exercise_type: str | None,
+    ) -> list[Any]:
+        """Fetch workout rows from Postgres with optional filters."""
+        sel = (
+            "SELECT id, user_id, date, exercise_type, exercise_name, "
+            "duration_minutes, sets, reps, weight, distance_km, notes, created_at "
+            "FROM agent_workouts"
+        )
+        order = " ORDER BY date DESC, created_at DESC"
+
+        conditions = ["user_id = $1"]
+        params: list[str | None] = [user_id]
+        param_idx = 2
+
+        if start_date:
+            conditions.append(f"date >= ${param_idx}")
+            params.append(start_date)
+            param_idx += 1
+        if end_date:
+            conditions.append(f"date <= ${param_idx}")
+            params.append(end_date)
+            param_idx += 1
+        if exercise_type:
+            conditions.append(f"exercise_type = ${param_idx}")
+            params.append(exercise_type)
+
+        where_clause = " AND ".join(conditions)
+        query = f"{sel} WHERE {where_clause}{order}"
+        return _as_row_list(await pool.fetch(query, *params))
+
+    async def initialize(self) -> None:
         async with self._lock:
             if self._initialized:
                 return
 
-            self._ensure_db_dir()
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._create_tables)
-            self._initialized = True
-            logger.info(f"Fitness storage initialized at {self.db_path}")
+            if self._use_postgres:
+                pool = await get_shared_app_pool()
+                if pool is None:
+                    msg = "Postgres was expected but pool could not be created"
+                    raise RuntimeError(msg)
+                self._pool = pool
+                await self._create_tables_postgres()
+                logger.info(
+                    "Fitness storage initialized (Postgres tables agent_calories, "
+                    "agent_workouts)"
+                )
+            else:
+                self._ensure_db_dir()
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, self._create_tables_sqlite)
+                logger.info("Fitness storage initialized at %s", self._sqlite_db_path)
 
-    def _create_tables(self) -> None:
-        """Create database tables if they don't exist."""
-        conn = self._get_connection()
+            self._initialized = True
+
+    async def _create_tables_postgres(self) -> None:
+        pool = self._pool
+        if pool is None:
+            msg = "Postgres pool is not initialized"
+            raise RuntimeError(msg)
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_calories (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    food_item TEXT NOT NULL,
+                    calories INTEGER NOT NULL,
+                    protein DOUBLE PRECISION,
+                    carbs DOUBLE PRECISION,
+                    fat DOUBLE PRECISION,
+                    meal_type TEXT NOT NULL DEFAULT 'snack',
+                    notes TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agent_calories_user_date
+                ON agent_calories (user_id, date)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_workouts (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    exercise_type TEXT NOT NULL DEFAULT 'other',
+                    exercise_name TEXT NOT NULL,
+                    duration_minutes INTEGER,
+                    sets INTEGER,
+                    reps INTEGER,
+                    weight DOUBLE PRECISION,
+                    distance_km DOUBLE PRECISION,
+                    notes TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agent_workouts_user_date
+                ON agent_workouts (user_id, date)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agent_workouts_exercise
+                ON agent_workouts (user_id, exercise_name)
+            """)
+
+    def _create_tables_sqlite(self) -> None:
+        conn = self._get_sqlite_connection()
         try:
-            # Calories table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS calories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,8 +224,6 @@ class FitnessStorage:
                 CREATE INDEX IF NOT EXISTS idx_calories_user_date
                 ON calories(user_id, date)
             """)
-
-            # Workouts table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS workouts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,10 +252,10 @@ class FitnessStorage:
         finally:
             conn.close()
 
-    # ==================== CALORIE OPERATIONS ====================
-
     async def add_calorie_entry(self, entry: CalorieEntry) -> int:
         """Add a new calorie entry to the database.
+
+        The entry is added to Postgres if configured, otherwise to SQLite.
 
         Args:
             entry: The calorie entry to add.
@@ -138,17 +265,49 @@ class FitnessStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_running_loop()
-        entry_id = await loop.run_in_executor(None, self._add_calorie_entry_sync, entry)
-        logger.info(
-            f"Added calorie entry {entry_id} for user {entry.user_id}: "
-            f"{entry.food_item} ({entry.calories} cal)"
-        )
-        return entry_id
+        if self._use_postgres:
+            pool = self._pool
+            if pool is None:
+                msg = "Postgres pool is not initialized"
+                raise RuntimeError(msg)
+            entry_id = await pool.fetchval(
+                """
+                INSERT INTO agent_calories
+                (user_id, date, food_item, calories, protein, carbs, fat,
+                 meal_type, notes, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING id
+                """,
+                entry.user_id,
+                entry.date,
+                entry.food_item,
+                entry.calories,
+                entry.protein,
+                entry.carbs,
+                entry.fat,
+                entry.meal_type.value,
+                entry.notes,
+                entry.created_at,
+            )
+            eid = int(entry_id) if entry_id is not None else 0
+        else:
+            loop = asyncio.get_running_loop()
+            eid = await loop.run_in_executor(
+                None, self._add_calorie_entry_sqlite, entry
+            )
 
-    def _add_calorie_entry_sync(self, entry: CalorieEntry) -> int:
-        """Synchronous implementation of add_calorie_entry."""
-        conn = self._get_connection()
+        logger.info(
+            "Added calorie entry %s for user %s: %s (%s cal)",
+            eid,
+            entry.user_id,
+            entry.food_item,
+            entry.calories,
+        )
+        return eid
+
+    def _add_calorie_entry_sqlite(self, entry: CalorieEntry) -> int:
+        """Synchronous implementation to add a calorie entry to SQLite."""
+        conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
                 """
@@ -181,48 +340,48 @@ class FitnessStorage:
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> list[CalorieEntry]:
-        """Get calorie entries for a user within a date range.
-
-        Args:
-            user_id: The user ID.
-            start_date: Optional start date (YYYY-MM-DD).
-            end_date: Optional end date (YYYY-MM-DD).
-
-        Returns:
-            List of calorie entries.
-        """
         await self.initialize()
 
-        loop = asyncio.get_running_loop()
-        entries = await loop.run_in_executor(
-            None, self._get_calorie_entries_sync, user_id, start_date, end_date
-        )
-        return entries
+        if self._use_postgres:
+            pool = self._pool
+            if pool is None:
+                msg = "Postgres pool is not initialized"
+                raise RuntimeError(msg)
+            rows = await self._fetch_calorie_rows_postgres(
+                pool, user_id, start_date, end_date
+            )
+            return [self._record_to_calorie_entry(r) for r in rows]
 
-    def _get_calorie_entries_sync(
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self._get_calorie_entries_sqlite,
+            user_id,
+            start_date,
+            end_date,
+        )
+
+    def _get_calorie_entries_sqlite(
         self,
         user_id: str,
         start_date: str | None,
         end_date: str | None,
     ) -> list[CalorieEntry]:
-        """Synchronous implementation of get_calorie_entries."""
-        conn = self._get_connection()
+        """Synchronous implementation to get calorie entries from SQLite."""
+        conn = self._get_sqlite_connection()
         try:
             query = "SELECT * FROM calories WHERE user_id = ?"
             params: list[Any] = [user_id]
-
             if start_date:
                 query += " AND date >= ?"
                 params.append(start_date)
             if end_date:
                 query += " AND date <= ?"
                 params.append(end_date)
-
             query += " ORDER BY date DESC, created_at DESC"
-
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
-            return [self._row_to_calorie_entry(row) for row in rows]
+            return [self._sqlite_row_to_calorie_entry(row) for row in rows]
         finally:
             conn.close()
 
@@ -232,16 +391,6 @@ class FitnessStorage:
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
-        """Get calorie statistics for a user.
-
-        Args:
-            user_id: The user ID.
-            start_date: Optional start date (YYYY-MM-DD).
-            end_date: Optional end date (YYYY-MM-DD).
-
-        Returns:
-            Dictionary with statistics including totals and averages.
-        """
         entries = await self.get_calorie_entries(user_id, start_date, end_date)
 
         if not entries:
@@ -258,8 +407,6 @@ class FitnessStorage:
         total_protein = sum(e.protein or 0 for e in entries)
         total_carbs = sum(e.carbs or 0 for e in entries)
         total_fat = sum(e.fat or 0 for e in entries)
-
-        # Get unique days
         unique_days = {e.date for e in entries}
         num_days = len(unique_days)
 
@@ -275,10 +422,10 @@ class FitnessStorage:
             "days_tracked": num_days,
         }
 
-    # ==================== WORKOUT OPERATIONS ====================
-
     async def add_workout_entry(self, entry: WorkoutEntry) -> int:
         """Add a new workout entry to the database.
+
+        The entry is added to Postgres if configured, otherwise to SQLite.
 
         Args:
             entry: The workout entry to add.
@@ -288,17 +435,49 @@ class FitnessStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_running_loop()
-        entry_id = await loop.run_in_executor(None, self._add_workout_entry_sync, entry)
-        logger.info(
-            f"Added workout entry {entry_id} for user {entry.user_id}: "
-            f"{entry.exercise_name}"
-        )
-        return entry_id
+        if self._use_postgres:
+            pool = self._pool
+            if pool is None:
+                msg = "Postgres pool is not initialized"
+                raise RuntimeError(msg)
+            entry_id = await pool.fetchval(
+                """
+                INSERT INTO agent_workouts
+                (user_id, date, exercise_type, exercise_name, duration_minutes,
+                 sets, reps, weight, distance_km, notes, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                RETURNING id
+                """,
+                entry.user_id,
+                entry.date,
+                entry.exercise_type.value,
+                entry.exercise_name,
+                entry.duration_minutes,
+                entry.sets,
+                entry.reps,
+                entry.weight,
+                entry.distance_km,
+                entry.notes,
+                entry.created_at,
+            )
+            eid = int(entry_id) if entry_id is not None else 0
+        else:
+            loop = asyncio.get_running_loop()
+            eid = await loop.run_in_executor(
+                None, self._add_workout_entry_sqlite, entry
+            )
 
-    def _add_workout_entry_sync(self, entry: WorkoutEntry) -> int:
-        """Synchronous implementation of add_workout_entry."""
-        conn = self._get_connection()
+        logger.info(
+            "Added workout entry %s for user %s: %s",
+            eid,
+            entry.user_id,
+            entry.exercise_name,
+        )
+        return eid
+
+    def _add_workout_entry_sqlite(self, entry: WorkoutEntry) -> int:
+        """Synchronous implementation to add a workout entry to SQLite."""
+        conn = self._get_sqlite_connection()
         try:
             cursor = conn.execute(
                 """
@@ -333,43 +512,40 @@ class FitnessStorage:
         end_date: str | None = None,
         exercise_type: str | None = None,
     ) -> list[WorkoutEntry]:
-        """Get workout entries for a user within a date range.
-
-        Args:
-            user_id: The user ID.
-            start_date: Optional start date (YYYY-MM-DD).
-            end_date: Optional end date (YYYY-MM-DD).
-            exercise_type: Optional filter by exercise type.
-
-        Returns:
-            List of workout entries.
-        """
         await self.initialize()
 
+        if self._use_postgres:
+            pool = self._pool
+            if pool is None:
+                msg = "Postgres pool is not initialized"
+                raise RuntimeError(msg)
+            rows = await self._fetch_workout_rows_postgres(
+                pool, user_id, start_date, end_date, exercise_type
+            )
+            return [self._record_to_workout_entry(r) for r in rows]
+
         loop = asyncio.get_running_loop()
-        entries = await loop.run_in_executor(
+        return await loop.run_in_executor(
             None,
-            self._get_workout_entries_sync,
+            self._get_workout_entries_sqlite,
             user_id,
             start_date,
             end_date,
             exercise_type,
         )
-        return entries
 
-    def _get_workout_entries_sync(
+    def _get_workout_entries_sqlite(
         self,
         user_id: str,
         start_date: str | None,
         end_date: str | None,
         exercise_type: str | None,
     ) -> list[WorkoutEntry]:
-        """Synchronous implementation of get_workout_entries."""
-        conn = self._get_connection()
+        """Synchronous implementation to get workout entries from SQLite."""
+        conn = self._get_sqlite_connection()
         try:
             query = "SELECT * FROM workouts WHERE user_id = ?"
             params: list[Any] = [user_id]
-
             if start_date:
                 query += " AND date >= ?"
                 params.append(start_date)
@@ -379,12 +555,10 @@ class FitnessStorage:
             if exercise_type:
                 query += " AND exercise_type = ?"
                 params.append(exercise_type)
-
             query += " ORDER BY date DESC, created_at DESC"
-
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
-            return [self._row_to_workout_entry(row) for row in rows]
+            return [self._sqlite_row_to_workout_entry(row) for row in rows]
         finally:
             conn.close()
 
@@ -394,16 +568,6 @@ class FitnessStorage:
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
-        """Get workout statistics for a user.
-
-        Args:
-            user_id: The user ID.
-            start_date: Optional start date (YYYY-MM-DD).
-            end_date: Optional end date (YYYY-MM-DD).
-
-        Returns:
-            Dictionary with statistics including frequency and PRs.
-        """
         entries = await self.get_workout_entries(user_id, start_date, end_date)
 
         if not entries:
@@ -415,18 +579,14 @@ class FitnessStorage:
             }
 
         total_minutes = sum(e.duration_minutes or 0 for e in entries)
-
-        # Count by exercise type
         type_counts: dict[str, int] = {}
         for entry in entries:
             et = entry.exercise_type.value
             type_counts[et] = type_counts.get(et, 0) + 1
 
-        # Find personal records (highest weight for strength exercises)
         prs: list[dict[str, Any]] = []
         strength_entries = [e for e in entries if e.weight is not None and e.weight > 0]
         if strength_entries:
-            # Group by exercise name and find max weight
             exercise_max: dict[str, float] = {}
             for e in strength_entries:
                 name = e.exercise_name.lower()
@@ -450,10 +610,10 @@ class FitnessStorage:
             "personal_records": prs,
         }
 
-    # ==================== DELETE OPERATIONS ====================
-
     async def delete_entry(self, entry_type: str, entry_id: int, user_id: str) -> bool:
         """Delete a calorie or workout entry.
+
+        Deletes the entry from Postgres if configured, otherwise from SQLite.
 
         Args:
             entry_type: Either "calorie" or "workout".
@@ -465,25 +625,54 @@ class FitnessStorage:
         """
         await self.initialize()
 
-        loop = asyncio.get_running_loop()
-        deleted = await loop.run_in_executor(
-            None, self._delete_entry_sync, entry_type, entry_id, user_id
-        )
+        if entry_type not in ("calorie", "workout"):
+            return False
+
+        if self._use_postgres:
+            pool = self._pool
+            if pool is None:
+                msg = "Postgres pool is not initialized"
+                raise RuntimeError(msg)
+            if entry_type == "calorie":
+                row = await pool.fetchrow(
+                    (
+                        "DELETE FROM agent_calories "
+                        "WHERE id = $1 AND user_id = $2 RETURNING id"
+                    ),
+                    entry_id,
+                    user_id,
+                )
+            else:
+                row = await pool.fetchrow(
+                    (
+                        "DELETE FROM agent_workouts "
+                        "WHERE id = $1 AND user_id = $2 RETURNING id"
+                    ),
+                    entry_id,
+                    user_id,
+                )
+            deleted = row is not None
+        else:
+            loop = asyncio.get_running_loop()
+            deleted = await loop.run_in_executor(
+                None, self._delete_entry_sqlite, entry_type, entry_id, user_id
+            )
+
         if deleted:
-            logger.info(f"Deleted {entry_type} entry {entry_id}")
+            logger.info("Deleted %s entry %s", entry_type, entry_id)
         return deleted
 
-    def _delete_entry_sync(self, entry_type: str, entry_id: int, user_id: str) -> bool:
-        """Synchronous implementation of delete_entry."""
-        # Validate entry_type to prevent SQL injection
+    def _delete_entry_sqlite(
+        self, entry_type: str, entry_id: int, user_id: str
+    ) -> bool:
+        """Synchronous implementation to delete an entry from SQLite."""
         valid_tables = {"calorie": "calories", "workout": "workouts"}
         if entry_type not in valid_tables:
             return False
         table = valid_tables[entry_type]
 
-        conn = self._get_connection()
+        conn = self._get_sqlite_connection()
         try:
-            # Table name is validated against whitelist above
             query = f"DELETE FROM {table} WHERE id = ? AND user_id = ?"  # noqa: S608
             cursor = conn.execute(query, (entry_id, user_id))
             conn.commit()
@@ -491,10 +680,8 @@ class FitnessStorage:
         finally:
             conn.close()
 
-    # ==================== HELPER METHODS ====================
-
-    def _row_to_calorie_entry(self, row: sqlite3.Row) -> CalorieEntry:
-        """Convert a database row to a CalorieEntry object."""
+    def _sqlite_row_to_calorie_entry(self, row: sqlite3.Row) -> CalorieEntry:
+        """Convert a SQLite database row to a CalorieEntry object."""
         return CalorieEntry(
             id=row["id"],
             user_id=row["user_id"],
@@ -509,8 +696,41 @@ class FitnessStorage:
             created_at=row["created_at"],
         )
 
-    def _row_to_workout_entry(self, row: sqlite3.Row) -> WorkoutEntry:
-        """Convert a database row to a WorkoutEntry object."""
+    def _record_to_calorie_entry(self, row: asyncpg.Record) -> CalorieEntry:
+        """Convert an asyncpg record to a CalorieEntry object."""
+        return CalorieEntry(
+            id=row["id"],
+            user_id=row["user_id"],
+            date=row["date"],
+            food_item=row["food_item"],
+            calories=row["calories"],
+            protein=row["protein"],
+            carbs=row["carbs"],
+            fat=row["fat"],
+            meal_type=MealType(row["meal_type"]),
+            notes=row["notes"],
+            created_at=row["created_at"],
+        )
+
+    def _sqlite_row_to_workout_entry(self, row: sqlite3.Row) -> WorkoutEntry:
+        """Convert a SQLite database row to a WorkoutEntry object."""
+        return WorkoutEntry(
+            id=row["id"],
+            user_id=row["user_id"],
+            date=row["date"],
+            exercise_type=ExerciseType(row["exercise_type"]),
+            exercise_name=row["exercise_name"],
+            duration_minutes=row["duration_minutes"],
+            sets=row["sets"],
+            reps=row["reps"],
+            weight=row["weight"],
+            distance_km=row["distance_km"],
+            notes=row["notes"],
+            created_at=row["created_at"],
+        )
+
+    def _record_to_workout_entry(self, row: asyncpg.Record) -> WorkoutEntry:
+        """Convert an asyncpg record to a WorkoutEntry object."""
         return WorkoutEntry(
             id=row["id"],
             user_id=row["user_id"],
@@ -527,7 +747,6 @@ class FitnessStorage:
         )
 
 
-# Global storage instance
 _storage: FitnessStorage | None = None
 
 

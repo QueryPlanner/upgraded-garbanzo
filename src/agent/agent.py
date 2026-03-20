@@ -39,6 +39,7 @@ from .tools import (  # noqa: E402
     delete_fitness_entry,
     example_tool,
     get_calorie_stats,
+    get_current_datetime,
     get_workout_stats,
     get_youtube_transcript,
     list_calories,
@@ -116,6 +117,7 @@ root_agent = LlmAgent(
         PreloadMemoryTool(),
         example_tool,
         # Reminder tools
+        get_current_datetime,
         schedule_reminder,
         list_reminders,
         cancel_reminder,

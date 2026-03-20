@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
 
+from ..utils.app_timezone import get_app_timezone, now_utc, utc_iso_seconds
 from .storage import Reminder, get_storage
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class ReminderScheduler:
         """
         self._bot: Bot | None = bot
         self._handler: TelegramHandler | None = None
-        self.scheduler = AsyncIOScheduler(timezone="UTC")
+        self.scheduler = AsyncIOScheduler(timezone=str(get_app_timezone()))
         self.storage = get_storage()
         self._running = False
 
@@ -160,7 +161,10 @@ class ReminderScheduler:
 
         try:
             # Parse the scheduled time from the reminder
-            scheduled_time = datetime.fromisoformat(reminder.trigger_time)
+            raw_ts = reminder.trigger_time.replace("Z", "+00:00")
+            scheduled_time = datetime.fromisoformat(raw_ts)
+            if scheduled_time.tzinfo is None:
+                scheduled_time = scheduled_time.replace(tzinfo=UTC)
 
             # Check if we have a handler for agent-aware reminders
             if self._handler is not None:
@@ -217,8 +221,8 @@ class ReminderScheduler:
         reminder = Reminder(
             user_id=user_id,
             message=message,
-            trigger_time=trigger_time.isoformat(),
-            created_at=datetime.now(UTC).isoformat(),
+            trigger_time=utc_iso_seconds(trigger_time),
+            created_at=now_utc().isoformat(timespec="seconds"),
         )
 
         reminder_id = await self.storage.add_reminder(reminder)

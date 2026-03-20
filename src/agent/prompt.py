@@ -1,12 +1,12 @@
 """Prompt definitions for the LLM agent."""
 
 import logging
-import os
-from datetime import UTC, datetime, tzinfo
+from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from google.adk.agents.readonly_context import ReadonlyContext
+
+from .utils.app_timezone import get_app_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,13 @@ def return_instruction_root() -> str:
 
     instruction = f"""{context}
 
+<time_and_reminders>
+- Default timezone is India Standard Time (Asia/Kolkata). Override with
+  AGENT_TIMEZONE if needed.
+- Before a relative reminder (e.g. \"in 10 minutes\"), call get_current_datetime
+  first, then schedule_reminder with a relative phrase or the ISO time.
+</time_and_reminders>
+
 <output_verbosity_spec>
 - Default: 3-6 sentences or 5 bullets or less for typical answers.
 - For simple yes/no + short explanation questions: 2 sentences or less.
@@ -102,7 +109,8 @@ def return_global_instruction(ctx: ReadonlyContext) -> str:
     Uses InstructionProvider pattern to ensure date/time updates at request time.
     GlobalInstructionPlugin expects signature: (ReadonlyContext) -> str
 
-    The timezone is configurable via the TZ environment variable (defaults to UTC).
+    The timezone defaults to India Standard Time (Asia/Kolkata); override with
+    AGENT_TIMEZONE (IANA name).
 
     Args:
         ctx: ReadonlyContext required by GlobalInstructionPlugin signature.
@@ -114,20 +122,14 @@ def return_global_instruction(ctx: ReadonlyContext) -> str:
     # ctx parameter required by GlobalInstructionPlugin interface
     # Currently unused but available for session-aware customization
 
-    # Get timezone from environment variable, default to UTC
-    tz_name = os.getenv("TZ", "UTC")
-
-    # Get the timezone object
-    tz: tzinfo
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        # Fallback to UTC if timezone is invalid
-        tz = UTC
+    tz = get_app_timezone()
+    tz_name = tz.key
 
     now_tz = datetime.now(tz)
     formatted_datetime = now_tz.strftime("%Y-%m-%d %H:%M:%S %A")
     return (
         f"\n\nYou are a helpful Assistant.\n"
-        f"Current time ({tz_name}): {formatted_datetime}"
+        f"Current time ({tz_name}): {formatted_datetime}\n"
+        "For reminders, call get_current_datetime before relative times like "
+        "'in 5 minutes' so scheduling matches this clock."
     )

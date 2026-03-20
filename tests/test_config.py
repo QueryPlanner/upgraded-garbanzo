@@ -122,6 +122,27 @@ class TestServerEnv:
         env = ServerEnv.model_validate(data)
         assert env.session_uri == "postgresql://user:pass@localhost/db"
 
+    def test_effective_asyncpg_dsn(self, valid_server_env: dict[str, str]) -> None:
+        """Raw asyncpg DSN for app tables; None when Postgres URL absent."""
+        env = ServerEnv.model_validate(valid_server_env)
+        assert env.effective_asyncpg_dsn is None
+
+        data = {
+            **valid_server_env,
+            "DATABASE_URL": "postgresql://user:pass@localhost/db",
+        }
+        env = ServerEnv.model_validate(data)
+        assert env.effective_asyncpg_dsn == "postgresql://user:pass@localhost/db"
+
+        db_url = "postgresql+asyncpg://user:pass@localhost/dbname"
+        data = {**valid_server_env, "DATABASE_URL": db_url}
+        env = ServerEnv.model_validate(data)
+        assert env.effective_asyncpg_dsn == "postgresql://user:pass@localhost/dbname"
+
+        data = {**valid_server_env, "AGENT_ENGINE": "only-engine"}
+        env = ServerEnv.model_validate(data)
+        assert env.effective_asyncpg_dsn is None
+
     def test_allow_origins_list_property(
         self, valid_server_env: dict[str, str]
     ) -> None:

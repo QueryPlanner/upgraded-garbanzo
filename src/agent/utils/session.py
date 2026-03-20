@@ -39,7 +39,7 @@ def create_session_service_for_runner(
     )
 
     if config is None:
-        config = SessionConfig.model_validate({})
+        config = SessionConfig.model_validate(os.environ)
 
     # Use in-memory sessions when no persistent storage is configured
     session_uri = config.asyncpg_session_uri
