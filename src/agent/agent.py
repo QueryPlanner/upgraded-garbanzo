@@ -17,7 +17,6 @@ from google.adk.plugins.global_instruction_plugin import (  # noqa: E402
     GlobalInstructionPlugin,
 )
 from google.adk.plugins.logging_plugin import LoggingPlugin  # noqa: E402
-from google.adk.tools.preload_memory_tool import PreloadMemoryTool  # noqa: E402
 
 from .callbacks import (  # noqa: E402
     LoggingCallbacks,
@@ -114,7 +113,7 @@ root_agent = LlmAgent(
     model=model,
     instruction=return_instruction_root(),
     tools=[
-        PreloadMemoryTool(),
+        # PreloadMemoryTool(),
         example_tool,
         # Reminder tools
         get_current_datetime,

@@ -175,7 +175,7 @@ class TestLogWorkout:
                 mock_tool_context,
                 exercise_name="Bench Press",
                 exercise_type="strength",
-                sets=4,
+                set=4,
                 reps=8,
                 weight=80.0,
             )
@@ -183,6 +183,7 @@ class TestLogWorkout:
             assert result["status"] == "success"
             assert result["entry_id"] == 1
             assert "Bench Press" in result["message"]
+            assert "set 4" in result["message"]
 
     @pytest.mark.asyncio
     async def test_log_workout_invalid_type(
