@@ -15,8 +15,10 @@ Usage:
 """
 
 import contextlib
+import html
 import logging
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -45,10 +47,6 @@ from .handler import (  # noqa: E402
     initialize_runner,
     process_message,
     reset_session,
-)
-from .markdown_converter import (  # noqa: E402
-    convert_markdown_to_telegram,
-    validate_telegram_markup,
 )
 from .notifications import get_notification_service  # noqa: E402
 
@@ -196,13 +194,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
-        # Convert markdown to Telegram MARKDOWN_V2 format
-        telegram_response = convert_markdown_to_telegram(response)
+        telegram_response = _render_markdown_as_html(response)
 
         # Split long messages if needed (Telegram has 4096 char limit)
         if len(telegram_response) <= MAX_MESSAGE_LENGTH:
-            await update.message.reply_text(
-                telegram_response, parse_mode=ParseMode.MARKDOWN_V2
+            await _send_validated_chunk(
+                message=update.message,
+                chunk=telegram_response,
+                fallback_text=response,
             )
         else:
             # Split into chunks at natural boundaries when possible
@@ -244,12 +243,11 @@ async def _send_long_message(message: Message, text: str) -> None:
     """Send a long message by splitting it at natural boundaries.
 
     This function attempts to split messages at paragraph breaks, newlines,
-    or sentence boundaries to preserve formatting and readability. It validates
-    each chunk to ensure Telegram markup is balanced.
+    or sentence boundaries to preserve formatting and readability.
 
     Args:
         message: The Telegram message object to reply to.
-        text: The text to send (already converted to Telegram format).
+        text: The text to send (already converted to Telegram HTML).
     """
     # Try to split at paragraph breaks first (double newlines)
     paragraphs = text.split("\n\n")
@@ -278,23 +276,79 @@ async def _send_long_message(message: Message, text: str) -> None:
             await _split_and_send(message, current_chunk)
 
 
-async def _send_validated_chunk(message: Message, chunk: str) -> None:
-    """Send a chunk after validating its markup.
+def _render_html_as_plain_text(text: str) -> str:
+    """Convert simple Telegram HTML into readable plain text."""
+    plain_text = re.sub(r"<a\s+href=\"([^\"]+)\">([^<]+)</a>", r"\2 (\1)", text)
+    plain_text = re.sub(r"</?(?:b|i|u|s|code|pre|blockquote)>", "", plain_text)
+    plain_text = plain_text.replace("&lt;", "<")
+    plain_text = plain_text.replace("&gt;", ">")
+    plain_text = plain_text.replace("&amp;", "&")
+    plain_text = plain_text.replace("&quot;", '"')
 
-    If the chunk has unbalanced markup entities, send without parse_mode
-    to avoid Telegram API errors.
+    return plain_text
+
+
+def _render_markdown_as_html(text: str) -> str:
+    """Convert common markdown patterns into Telegram-safe HTML."""
+    escaped_text = html.escape(text)
+
+    escaped_text = re.sub(
+        r"\[([^\]]+)\]\(([^)]+)\)",
+        lambda match: (
+            f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>'
+        ),
+        escaped_text,
+    )
+    escaped_text = re.sub(
+        r"(?m)^#{1,6}\s*(.+)$",
+        lambda match: f"<b>{match.group(1).strip()}</b>",
+        escaped_text,
+    )
+    escaped_text = re.sub(r"(?<!\*)\*\*([^*]+)\*\*(?!\*)", r"<b>\1</b>", escaped_text)
+    escaped_text = re.sub(r"(?<!_)__([^_]+)__(?!_)", r"<u>\1</u>", escaped_text)
+    escaped_text = re.sub(r"~~([^~]+)~~", r"<s>\1</s>", escaped_text)
+    escaped_text = re.sub(
+        r"(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)",
+        r"<i>\1</i>",
+        escaped_text,
+    )
+    escaped_text = re.sub(
+        r"(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)",
+        r"<i>\1</i>",
+        escaped_text,
+    )
+    escaped_text = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped_text)
+
+    return escaped_text.strip()
+
+
+async def _send_validated_chunk(
+    message: Message,
+    chunk: str,
+    fallback_text: str | None = None,
+) -> None:
+    """Send a chunk using Telegram HTML with a plain-text fallback.
 
     Args:
         message: The Telegram message object to reply to.
         chunk: The text chunk to send.
+        fallback_text: Original markdown version to send if HTML fails.
     """
-    if validate_telegram_markup(chunk):
-        await message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
+    if fallback_text is not None:
+        plain_text = fallback_text
     else:
-        # Markup is unbalanced - send without formatting to avoid errors
-        logger.warning("Unbalanced markup detected, sending without formatting")
-        # Strip formatting by sending without parse_mode
-        await message.reply_text(chunk)
+        plain_text = _render_html_as_plain_text(chunk)
+
+    try:
+        await message.reply_text(chunk, parse_mode=ParseMode.HTML)
+        return
+    except TelegramError:
+        logger.warning(
+            "Telegram rejected HTML chunk, retrying without formatting",
+            exc_info=True,
+        )
+
+    await message.reply_text(plain_text)
 
 
 async def _split_and_send(message: Message, text: str) -> None:

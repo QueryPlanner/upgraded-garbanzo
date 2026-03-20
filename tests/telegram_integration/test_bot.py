@@ -8,7 +8,9 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from agent.telegram.bot import (
+    _render_markdown_as_html,
     _send_long_message,
+    _send_validated_chunk,
     _split_and_send,
     create_application,
     handle_message,
@@ -189,7 +191,7 @@ class TestHandleMessage:
     async def test_processes_message_and_sends_response(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:
-        """Test that message is processed and response is sent with MARKDOWN_V2."""
+        """Test that message is processed and response is sent with HTML."""
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
@@ -197,9 +199,9 @@ class TestHandleMessage:
         ):
             await handle_message(mock_update, mock_context)
 
-            # ! is special char and gets escaped, ? is not
             mock_update.message.reply_text.assert_called_once_with(
-                "Hello\\! How can I help?", parse_mode=ParseMode.MARKDOWN_V2
+                "Hello! How can I help?",
+                parse_mode=ParseMode.HTML,
             )
 
     @pytest.mark.asyncio
@@ -319,7 +321,7 @@ class TestHandleMessage:
     async def test_sends_single_message_when_under_limit(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:
-        """Test that short messages are sent as single message with MARKDOWN_V2."""
+        """Test that short messages are sent as single HTML message."""
         short_response = "Short response"
 
         with patch(
@@ -330,7 +332,59 @@ class TestHandleMessage:
             await handle_message(mock_update, mock_context)
 
             mock_update.message.reply_text.assert_called_once_with(
-                short_response, parse_mode=ParseMode.MARKDOWN_V2
+                short_response, parse_mode=ParseMode.HTML
+            )
+
+    @pytest.mark.asyncio
+    async def test_retries_without_markdown_when_telegram_rejects_chunk(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """Telegram HTML failures should fall back to plain text."""
+        mock_update.message.reply_text = AsyncMock(
+            side_effect=[TelegramError("Can't parse entities"), None]
+        )
+
+        with patch(
+            "agent.telegram.bot.process_message",
+            new_callable=AsyncMock,
+            return_value=r"\((1-\text{tax rate})\)",
+        ):
+            await handle_message(mock_update, mock_context)
+
+            assert mock_update.message.reply_text.call_count == 2
+            first_call = mock_update.message.reply_text.call_args_list[0]
+            second_call = mock_update.message.reply_text.call_args_list[1]
+
+            assert first_call.kwargs["parse_mode"] == ParseMode.HTML
+            assert second_call.args[0] == r"\((1-\text{tax rate})\)"
+            assert "parse_mode" not in second_call.kwargs
+
+    @pytest.mark.asyncio
+    async def test_passes_latex_style_text_through_without_dropping_reply(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """LaTeX-style text should still be delivered as plain visible text."""
+        response = (
+            r"\["
+            r"\text{After-tax cost of debt} = "
+            r"\underbrace{r_{\text{pre}}}{\text{interest rate}} "
+            r"\times \Bigl(1 - T\Bigr)"
+            r"\]"
+        )
+
+        with patch(
+            "agent.telegram.bot.process_message",
+            new_callable=AsyncMock,
+            return_value=response,
+        ):
+            await handle_message(mock_update, mock_context)
+
+            sent_text = mock_update.message.reply_text.call_args.args[0]
+
+            assert r"\text{After-tax cost of debt}" in sent_text
+            assert "interest rate" in sent_text
+            assert mock_update.message.reply_text.call_args.kwargs["parse_mode"] == (
+                ParseMode.HTML
             )
 
 
@@ -354,7 +408,7 @@ class TestSendLongMessage:
 
     @pytest.mark.asyncio
     async def test_sends_single_message_for_short_text(self) -> None:
-        """Test that short text is sent as single message with MARKDOWN_V2."""
+        """Test that short text is sent as single message with HTML."""
         mock_message = MagicMock()
         mock_message.reply_text = AsyncMock()
 
@@ -363,7 +417,7 @@ class TestSendLongMessage:
         await _send_long_message(mock_message, short_text)
 
         mock_message.reply_text.assert_called_once_with(
-            short_text, parse_mode=ParseMode.MARKDOWN_V2
+            short_text, parse_mode=ParseMode.HTML
         )
 
     @pytest.mark.asyncio
@@ -405,6 +459,66 @@ class TestSendLongMessage:
 
         # Should not send any message
         mock_message.reply_text.assert_not_called()
+
+
+class TestSendValidatedChunk:
+    """Tests for _send_validated_chunk helper."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_html_for_unbalanced_markup(self) -> None:
+        """Chunks are sent with HTML parse mode by default."""
+        mock_message = MagicMock()
+        mock_message.reply_text = AsyncMock()
+
+        await _send_validated_chunk(mock_message, "*unclosed")
+
+        mock_message.reply_text.assert_called_once_with(
+            "*unclosed",
+            parse_mode=ParseMode.HTML,
+        )
+
+    @pytest.mark.asyncio
+    async def test_retries_plain_text_when_telegram_rejects_html(self) -> None:
+        """Telegram HTML failures should retry without formatting."""
+        mock_message = MagicMock()
+        mock_message.reply_text = AsyncMock(
+            side_effect=[TelegramError("Can't parse entities"), None]
+        )
+
+        await _send_validated_chunk(
+            mock_message,
+            chunk="value \\(test\\)",
+            fallback_text="value (test)",
+        )
+
+        assert mock_message.reply_text.call_count == 2
+        first_call = mock_message.reply_text.call_args_list[0]
+        second_call = mock_message.reply_text.call_args_list[1]
+
+        assert first_call.args[0] == "value \\(test\\)"
+        assert first_call.kwargs["parse_mode"] == ParseMode.HTML
+        assert second_call.args[0] == "value (test)"
+        assert "parse_mode" not in second_call.kwargs
+
+
+class TestRenderMarkdownAsHtml:
+    """Tests for markdown-to-HTML fallback rendering."""
+
+    def test_preserves_common_markdown_formatting(self) -> None:
+        """Fallback HTML should keep useful formatting."""
+        markdown = (
+            "### Bottom line\n\n"
+            "The **cost of debt** is `6%` and [details](https://example.com).\n"
+            r"\((1-\text{tax rate})\)"
+        )
+
+        result = _render_markdown_as_html(markdown)
+
+        assert "<b>Bottom line</b>" in result
+        assert "<b>cost of debt</b>" in result
+        assert "<code>6%</code>" in result
+        assert '<a href="https://example.com">details</a>' in result
+        assert r"\((1-\text{tax rate})\)" in result
 
 
 class TestSplitAndSend:

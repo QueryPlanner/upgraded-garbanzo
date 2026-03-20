@@ -99,7 +99,7 @@ def hello():
 
     def test_special_chars_escaped(self) -> None:
         """All special characters are escaped in regular text."""
-        special = "_*[]()~>#+-=|{}.!"
+        special = "\\_*[]()~>#+-=|{}.!"
         result = convert_markdown_to_telegram(special)
         # All should be escaped
         for char in special:
@@ -175,8 +175,8 @@ class TestEscapeSpecialChars:
 
     def test_all_special_chars(self) -> None:
         """All special characters are escaped."""
-        result = _escape_special_chars("_*[]()~>#+-=|{}.!")
-        assert result == "\\_\\*\\[\\]\\(\\)\\~\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!"
+        result = _escape_special_chars("\\_*[]()~>#+-=|{}.!")
+        assert result == "\\\\\\_\\*\\[\\]\\(\\)\\~\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!"
 
     def test_mixed_content(self) -> None:
         """Mixed regular and special characters."""
@@ -209,10 +209,20 @@ class TestEdgeCases:
         assert "\\*" in result
 
     def test_escaped_backslash(self) -> None:
-        """Backslash handling - not a special char in MARKDOWN_V2."""
+        """Backslashes are escaped so Telegram renders them literally."""
         result = convert_markdown_to_telegram("path\\to\\file")
-        # Backslash is not in SPECIAL_CHARS, so it's preserved
-        assert result == "path\\to\\file"
+        assert result == "path\\\\to\\\\file"
+
+    def test_latex_style_math_is_escaped_safely(self) -> None:
+        """LaTeX-like math syntax should be escaped for Telegram."""
+        result = convert_markdown_to_telegram(r"\((1-\text{tax rate})\)")
+
+        assert "\\(" in result
+        assert "\\)" in result
+        assert "\\{" in result
+        assert "\\}" in result
+        assert "\\-" in result
+        assert "\\\\text" in result
 
     def test_newlines_preserved(self) -> None:
         """Newlines are preserved."""
