@@ -286,6 +286,7 @@ class TestTelegramHandler:
                 app_name="test-app",
                 user_id="user-1",
                 session_id="user-1",
+                state={"user_id": "user-1"},
             )
 
     @pytest.mark.asyncio
@@ -315,6 +316,7 @@ class TestTelegramHandler:
                 app_name="test-app",
                 user_id="user-1",
                 session_id="custom-session",
+                state={"user_id": "user-1"},
             )
 
     @pytest.mark.asyncio

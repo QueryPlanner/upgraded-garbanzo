@@ -225,11 +225,12 @@ class TelegramHandler:
             )
 
         try:
-            # The crucial part is creating a new session.
+            # The crucial part is creating a new session with initial state.
             await self.runner.session_service.create_session(
                 app_name=self.app_name,
                 user_id=user_id,
                 session_id=effective_session_id,
+                state={"user_id": user_id},
             )
             logger.info(
                 f"Created new session for user={user_id}, "
