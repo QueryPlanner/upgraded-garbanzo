@@ -1,5 +1,6 @@
 """Tests for telegram_handler module."""
 
+import logging
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -76,6 +77,31 @@ class TestTelegramHandler:
             response = await handler.process_message("user-1", "Hello")
 
         assert response == "Hello!"
+
+    @pytest.mark.asyncio
+    async def test_process_message_logs_pre_llm_latency_when_enabled(
+        self,
+        mock_agent: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """TELEGRAM_LATENCY_LOG=1 emits structured pre-LLM timing at INFO."""
+        monkeypatch.setenv("TELEGRAM_LATENCY_LOG", "1")
+        caplog.set_level(logging.INFO, logger="agent.telegram.handler")
+
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        async def mock_run_async(**kwargs: object) -> object:
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="Hello!")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            await handler.process_message("user-1", "Hello")
+
+        assert any(
+            "telegram.pre_llm_latency" in record.message for record in caplog.records
+        )
 
     @pytest.mark.asyncio
     async def test_process_message_uses_existing_session(

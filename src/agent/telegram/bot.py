@@ -14,6 +14,7 @@ Usage:
     - Use /help to see available commands
 """
 
+import asyncio
 import contextlib
 import html
 import logging
@@ -170,14 +171,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info(f"Message from {user_id}: {user_message[:50]}...")
 
-    # Send typing indicator (best effort - don't fail if this times out)
-    try:
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action="typing",
-        )
-    except (TimedOut, NetworkError):
-        logger.warning(f"Failed to send typing indicator for user {user_id}")
+    chat_id = update.effective_chat.id
+
+    # Typing indicator: do not await before ADK work. A slow Telegram API
+    # would otherwise add full round-trip latency before session/LLM pipeline.
+    async def _send_typing_indicator() -> None:
+        try:
+            await context.bot.send_chat_action(
+                chat_id=chat_id,
+                action="typing",
+            )
+        except (TimedOut, NetworkError):
+            logger.warning(f"Failed to send typing indicator for user {user_id}")
+        except Exception:
+            logger.exception("Unexpected error sending typing indicator")
+
+    asyncio.create_task(_send_typing_indicator())
 
     try:
         # Process message through ADK agent
