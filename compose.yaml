@@ -1,3 +1,19 @@
+# ============================================================
+# Data persistence via Docker named volumes
+# ============================================================
+# Reminders and fitness data (calories, workouts) are stored in
+# SQLite files inside the `agent_data` named volume.
+#
+# Named volumes SURVIVE redeployment:
+#   docker compose up -d   ← safe: volumes are preserved
+#   docker compose down    ← safe: volumes are preserved
+#
+# ⚠️  WARNING — DATA LOSS:
+#   docker compose down -v ← DESTROYS all volumes (reminders, fitness,
+#                             ADK artifacts, context). Use only when you
+#                             intentionally want to wipe all agent data.
+# ============================================================
+
 services:
   telegram-bot:
     image: ${IMAGE}
@@ -5,13 +21,13 @@ services:
     environment:
       - AGENT_NAME=telegram-agent
       - LOG_LEVEL=INFO
-      # DATABASE_URL, API Keys, and TELEGRAM_BOT_TOKEN loaded from .env
+      # API keys and TELEGRAM_BOT_TOKEN loaded from .env
     env_file:
       - .env
     volumes:
-      # ADK artifacts (session artifacts, etc.)
+      # ADK session artifacts
       - agent_artifacts:/app/src/.adk
-      # Local data dir (SQLite fallback if DATABASE_URL unset; context files path)
+      # SQLite databases for reminders and fitness tracking
       - agent_data:/app/src/agent/data
       # Context files: USER.md, IDENTITY.md, SOUL.md
       - agent_context:/app/src/.context

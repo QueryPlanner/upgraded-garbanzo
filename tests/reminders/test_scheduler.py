@@ -1,7 +1,7 @@
 """Unit tests for reminder scheduler."""
 
 import tempfile
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -14,11 +14,19 @@ from agent.reminders.storage import Reminder, ReminderStorage
 
 @pytest.fixture
 def isolated_db_path() -> Generator[Path]:
-    """Create a temporary database for each test."""
+    """Create a temporary database file for each test."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = Path(f.name)
     yield path
     path.unlink(missing_ok=True)
+
+
+@pytest.fixture
+async def isolated_storage(isolated_db_path: Path) -> AsyncGenerator[ReminderStorage]:
+    """ReminderStorage backed by a temp file; closes connection on teardown."""
+    storage = ReminderStorage(db_path=isolated_db_path)
+    yield storage
+    await storage.close()
 
 
 class TestReminderScheduler:
@@ -82,11 +90,10 @@ class TestReminderScheduler:
         await scheduler.stop()
 
     @pytest.mark.asyncio
-    async def test_schedule_reminder(self, isolated_db_path: Path) -> None:
+    async def test_schedule_reminder(self, isolated_storage: ReminderStorage) -> None:
         """Test scheduling a reminder."""
-        storage = ReminderStorage(db_path=isolated_db_path)
         scheduler = ReminderScheduler()
-        scheduler.storage = storage
+        scheduler.storage = isolated_storage
 
         trigger_time = datetime.now(UTC) + timedelta(hours=1)
         reminder_id = await scheduler.schedule_reminder(
@@ -96,18 +103,14 @@ class TestReminderScheduler:
         )
 
         assert reminder_id > 0
-
-        # Cleanup
         await scheduler.stop()
 
     @pytest.mark.asyncio
-    async def test_get_user_reminders(self, isolated_db_path: Path) -> None:
+    async def test_get_user_reminders(self, isolated_storage: ReminderStorage) -> None:
         """Test getting user reminders."""
-        storage = ReminderStorage(db_path=isolated_db_path)
         scheduler = ReminderScheduler()
-        scheduler.storage = storage
+        scheduler.storage = isolated_storage
 
-        # Schedule a reminder
         trigger_time = datetime.now(UTC) + timedelta(hours=1)
         await scheduler.schedule_reminder(
             user_id="test_user",
@@ -115,12 +118,10 @@ class TestReminderScheduler:
             trigger_time=trigger_time,
         )
 
-        # Get reminders
         reminders = await scheduler.get_user_reminders("test_user")
         assert len(reminders) == 1
         assert reminders[0].message == "Test message"
 
-        # Cleanup
         await scheduler.stop()
 
 
@@ -129,12 +130,11 @@ class TestAgentAwareReminders:
 
     @pytest.mark.asyncio
     async def test_send_reminder_uses_handler_when_set(
-        self, isolated_db_path: Path
+        self, isolated_storage: ReminderStorage
     ) -> None:
         """Test that reminder is processed through handler when set."""
-        storage = ReminderStorage(db_path=isolated_db_path)
         scheduler = ReminderScheduler()
-        scheduler.storage = storage
+        scheduler.storage = isolated_storage
 
         # Set up mocks
         mock_bot = MagicMock()
@@ -174,12 +174,11 @@ class TestAgentAwareReminders:
 
     @pytest.mark.asyncio
     async def test_send_reminder_fallback_without_handler(
-        self, isolated_db_path: Path
+        self, isolated_storage: ReminderStorage
     ) -> None:
         """Test that reminder falls back to simple message without handler."""
-        storage = ReminderStorage(db_path=isolated_db_path)
         scheduler = ReminderScheduler()
-        scheduler.storage = storage
+        scheduler.storage = isolated_storage
 
         # Set up only the bot (no handler)
         mock_bot = MagicMock()
@@ -209,12 +208,11 @@ class TestAgentAwareReminders:
 
     @pytest.mark.asyncio
     async def test_send_reminder_handles_handler_exception(
-        self, isolated_db_path: Path
+        self, isolated_storage: ReminderStorage
     ) -> None:
         """Test handler exception is caught and reminder is not sent."""
-        storage = ReminderStorage(db_path=isolated_db_path)
         scheduler = ReminderScheduler()
-        scheduler.storage = storage
+        scheduler.storage = isolated_storage
 
         # Set up mocks
         mock_bot = MagicMock()
