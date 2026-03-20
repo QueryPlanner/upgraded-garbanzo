@@ -92,10 +92,12 @@ async def schedule_reminder(
     Args:
         tool_context: ADK ToolContext with user_id in state.
         message: The reminder message to send (max 500 characters).
-        reminder_datetime: When to send the reminder (interpreted in India Standard
-            Time by default). Prefer calling get_current_datetime first, then either
-            pass its iso_datetime or a relative phrase: "in 30 minutes",
-            "tomorrow at 9am", "in 2 hours", or "YYYY-MM-DD HH:MM:SS".
+        reminder_datetime: When to fire, in the app local timezone (default IST /
+            Asia/Kolkata; set AGENT_TIMEZONE to change). Use wall-clock strings such
+            as '2026-03-15 14:30' (14:30 IST), the iso_datetime from
+            get_current_datetime, or relative phrases like 'in 30 minutes' or
+            'tomorrow at 9am' (anchored to local wall clock). Stored as UTC
+            internally for ordering.
 
     Returns:
         A dictionary with status, reminder_id, and confirmation message.
@@ -118,9 +120,9 @@ async def schedule_reminder(
         logger.warning(f"Failed to parse datetime '{reminder_datetime}': {e}")
         return {
             "status": "error",
-            "message": "Could not understand the time format. "
-            "Please use a format like '2026-03-15 14:30' or "
-            "'in 30 minutes', 'tomorrow at 9am'.",
+            "message": "Could not understand the time. Use IST/local wall time, e.g. "
+            "'2026-03-15 14:30', get_current_datetime's iso_datetime, or "
+            "'in 30 minutes' / 'tomorrow at 9am'.",
         }
 
     # Validate message length
