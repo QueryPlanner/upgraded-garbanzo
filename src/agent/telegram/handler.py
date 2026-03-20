@@ -5,6 +5,8 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 """
 
 import logging
+import os
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -22,6 +24,13 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+def _telegram_latency_log_enabled() -> bool:
+    """True when TELEGRAM_LATENCY_LOG requests structured pre-LLM timing logs."""
+    value = os.environ.get("TELEGRAM_LATENCY_LOG", "").strip().lower()
+    return value in ("1", "true", "yes")
+
 
 # Template for injecting reminders into the agent's context
 REMINDER_PROMPT_TEMPLATE = """[SCHEDULED REMINDER]
@@ -136,6 +145,9 @@ class TelegramHandler:
         Returns:
             The agent's response text.
         """
+        latency_log = _telegram_latency_log_enabled()
+        pipeline_start = time.perf_counter()
+
         # Use user_id as session_id if not provided
         effective_session_id = session_id or user_id
 
@@ -181,16 +193,41 @@ class TelegramHandler:
 
         logger.info(f"Session state keys: {list(session.state.keys())}")
 
+        session_ready = time.perf_counter()
+
         # Create the user message
         content = types.Content(role="user", parts=[types.Part(text=message)])
 
         # Run the agent and collect the response
         response_parts: list[str] = []
+        if latency_log:
+            session_ms = (session_ready - pipeline_start) * 1000
+            logger.info(
+                "telegram.pre_llm_latency user_id=%s session_ms=%.1f "
+                "(DB/session work in handler before run_async)",
+                user_id,
+                session_ms,
+            )
+
+        run_started = time.perf_counter()
+        first_stream_event_logged = False
         async for event in self.runner.run_async(
             user_id=user_id,
             session_id=effective_session_id,
             new_message=content,
         ):
+            if latency_log and not first_stream_event_logged:
+                first_stream_event_logged = True
+                first_event = time.perf_counter()
+                ms_after_run = (first_event - run_started) * 1000
+                logger.info(
+                    "telegram.adk_first_stream_event user_id=%s "
+                    "ms_after_run_async_started=%.1f "
+                    "(often includes LLM; first yield may be late)",
+                    user_id,
+                    ms_after_run,
+                )
+
             # Extract text from model responses, filtering out thought parts
             # Thought parts contain internal reasoning and should not be shown to users
             if event.content and event.content.parts:
@@ -204,6 +241,13 @@ class TelegramHandler:
                         continue
                     if part.text:
                         response_parts.append(part.text)
+
+        if latency_log and not first_stream_event_logged:
+            logger.info(
+                "telegram.adk_first_stream_event user_id=%s "
+                "ms_after_run_async_started=n/a (run_async yielded no events)",
+                user_id,
+            )
 
         return "".join(response_parts)
 

@@ -44,6 +44,7 @@ def mock_dependencies() -> Generator[MagicMock]:
             "pool_timeout": 30,
         }
         mock_env.asyncpg_session_uri = "postgresql+asyncpg://user:pass@localhost/db"
+        mock_env.adk_use_database_session = True
 
         mock_init_env.return_value = mock_env
 

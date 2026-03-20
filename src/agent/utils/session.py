@@ -2,6 +2,8 @@
 
 Provides a shared way to create session services for both the FastAPI server
 and the Telegram bot, using DATABASE_URL when set for persistent storage.
+Set ADK_USE_DATABASE_SESSION=false to keep DATABASE_URL for app tables only
+(reminders, fitness) while using in-memory ADK sessions.
 """
 
 import os
@@ -19,8 +21,9 @@ def create_session_service_for_runner(
 ) -> BaseSessionService:
     """Create session service for an ADK runner (e.g., Telegram bot).
 
-    Uses DATABASE_URL or AGENT_ENGINE when set for persistent storage.
-    Otherwise returns in-memory session service.
+    Uses DATABASE_URL or AGENT_ENGINE when set for persistent storage, unless
+    ADK_USE_DATABASE_SESSION is false (in-memory only; DATABASE_URL unchanged
+    for other features). Otherwise returns in-memory session service.
 
     Args:
         config: SessionConfig instance with validated configuration. If None,
@@ -40,6 +43,9 @@ def create_session_service_for_runner(
 
     if config is None:
         config = SessionConfig.model_validate(os.environ)
+
+    if not config.adk_use_database_session:
+        return InMemorySessionService()
 
     # Use in-memory sessions when no persistent storage is configured
     session_uri = config.asyncpg_session_uri

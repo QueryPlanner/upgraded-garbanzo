@@ -90,9 +90,13 @@ uv run telegram-bot
 - `telegram/bot.py`: Main bot runner and message handlers
 - `telegram/handler.py`: ADK integration layer (session management, message processing)
 
+### Pre-LLM latency
+
+Set `TELEGRAM_LATENCY_LOG=1` in `.env` for two INFO lines: `telegram.pre_llm_latency` reports `session_ms` (handler session I/O, e.g. Postgres, **before** `run_async`). `telegram.adk_first_stream_event` reports time from `run_async` until the **first yielded event** — with the current ADK runner this often **includes the LLM round-trip**, because the first event may arrive only when the model reply is ready, so do not treat it as “pre-LLM.” The typing indicator uses `asyncio.create_task` so a slow `send_chat_action` does not block session setup or the runner.
+
 ### Session Persistence
 
-The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set in `.env`, sessions are persisted in Postgres and survive restarts. Without it, sessions are in-memory only.
+The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set and `ADK_USE_DATABASE_SESSION` is true (default), sessions are persisted in Postgres and survive restarts. Set `ADK_USE_DATABASE_SESSION=false` to use **in-memory** ADK sessions while keeping `DATABASE_URL` for reminders, fitness, and other app tables (avoids Postgres latency on every Telegram message). For deployed bots, set the same variable in your host or **GitHub Actions environment** (or deployment secrets) so it is injected at runtime without committing `.env`.
 
 ## Development Conventions
 

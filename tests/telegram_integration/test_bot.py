@@ -1,5 +1,6 @@
 """Tests for telegram_bot module."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -215,6 +216,8 @@ class TestHandleMessage:
             return_value="Response",
         ):
             await handle_message(mock_update, mock_context)
+            # Typing runs in a background task; yield so it can complete.
+            await asyncio.sleep(0)
 
             mock_context.bot.send_chat_action.assert_called_once_with(
                 chat_id=67890, action="typing"

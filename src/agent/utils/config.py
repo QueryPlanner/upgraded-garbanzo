@@ -174,6 +174,15 @@ class SessionConfig(BaseModel):
         description="Database URL for session storage (e.g., postgresql://...)",
     )
 
+    adk_use_database_session: bool = Field(
+        default=True,
+        alias="ADK_USE_DATABASE_SESSION",
+        description=(
+            "When false, ADK conversation sessions stay in-memory only; "
+            "DATABASE_URL is still used for reminders, fitness, and other app tables."
+        ),
+    )
+
     db_pool_pre_ping: bool = Field(
         default=True,
         alias="DB_POOL_PRE_PING",
@@ -355,6 +364,7 @@ class ServerEnv(SessionConfig):
         print(f"RELOAD_AGENTS:         {self.reload_agents}")
         print(f"AGENT_ENGINE:          {self.agent_engine}")
         print(f"DATABASE_URL:          {self.database_url}")
+        print(f"ADK_USE_DATABASE_SESSION: {self.adk_use_database_session}")
         if self.database_url:
             print(f"DB_POOL_PRE_PING:      {self.db_pool_pre_ping}")
             print(f"DB_POOL_RECYCLE:       {self.db_pool_recycle}")

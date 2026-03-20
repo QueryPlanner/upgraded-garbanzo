@@ -41,7 +41,9 @@ AGENT_DIR = os.getenv("AGENT_DIR", str(Path(__file__).resolve().parent.parent))
 # ADK fastapi app will set up OTel using resource attributes from env vars
 app: FastAPI = get_fast_api_app(
     agents_dir=AGENT_DIR,
-    session_service_uri=env.asyncpg_session_uri,
+    session_service_uri=(
+        env.asyncpg_session_uri if env.adk_use_database_session else None
+    ),
     session_db_kwargs=env.session_db_kwargs,
     artifact_service_uri=None,  # Explicitly None as GCP bucket not used
     # Memory service does not yet support Postgres scheme in ADK
@@ -79,7 +81,8 @@ def main() -> None:
         SERVE_WEB_INTERFACE: Whether to serve the web interface (true/false)
         RELOAD_AGENTS: Whether to reload agents on file changes (true/false)
         AGENT_ENGINE: Agent Engine instance for session and memory
-        DATABASE_URL: Postgres URL for session and memory
+        DATABASE_URL: Postgres for ADK sessions (if enabled) and app tables
+        ADK_USE_DATABASE_SESSION: false = in-memory sessions; DB URL for app tables only
         OPENROUTER_API_KEY: Key for LiteLLM/OpenRouter
         ALLOW_ORIGINS: JSON array string of allowed CORS origins
         HOST: Server host (default: 127.0.0.1, set to 0.0.0.0 for containers)
