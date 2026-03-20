@@ -81,9 +81,12 @@ The reminder system allows users to schedule reminders through natural language 
    - Manages the reminder lifecycle
 
 3. **Agent Tools** (`tools.py`)
-   - `schedule_reminder`: Create new reminders with flexible time parsing
-   - `list_reminders`: View scheduled reminders
+   - `get_current_datetime`: Server clock in the app timezone (default IST) to the second
+   - `schedule_reminder`: Create reminders; relative phrases use `Asia/Kolkata` and `RELATIVE_BASE`
+   - `list_reminders`: View scheduled reminders (times shown in app timezone)
    - `cancel_reminder`: Delete pending reminders
+
+Reminder `trigger_time` values are stored in UTC ISO for ordering; user-facing strings use `AGENT_TIMEZONE` (default `Asia/Kolkata`).
 
 #### Flow
 

@@ -31,6 +31,7 @@ Copy `.env.example` to `.env`:
 
 - **`AGENT_NAME`**: Unique ID for your agent.
 - **`DATABASE_URL`**: Postgres connection string (sessions plus `agent_reminders`, `agent_calories`, `agent_workouts` tables).
+- **`AGENT_TIMEZONE`**: IANA zone for reminders and fitness “today” (default `Asia/Kolkata` / IST).
 - **`OPENROUTER_API_KEY`**: Recommended for accessing varied models.
 - **`GOOGLE_API_KEY`**: Optional. Required only if using Gemini models directly.
 

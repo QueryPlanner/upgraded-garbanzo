@@ -1,6 +1,7 @@
 """Unit tests for prompt definition functions."""
 
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from conftest import MockReadonlyContext
 
@@ -82,11 +83,12 @@ class TestReturnGlobalInstruction:
     ) -> None:
         """Test that instruction includes today's date dynamically."""
         instruction = return_global_instruction(mock_readonly_context)  # type: ignore
-        today = str(date.today())
+        ist_today = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
 
-        assert today in instruction
-        # Should include timezone info (defaults to UTC when TZ env var not set)
+        assert ist_today in instruction
+        # Default app timezone is Asia/Kolkata (see AGENT_TIMEZONE)
         assert "current time" in instruction.lower()
+        assert "Asia/Kolkata" in instruction
 
     def test_includes_assistant_context(
         self, mock_readonly_context: MockReadonlyContext
@@ -155,7 +157,7 @@ class TestReturnGlobalInstruction:
         instruction1 = return_global_instruction(context1)  # type: ignore
         instruction2 = return_global_instruction(context2)  # type: ignore
 
-        # Both should contain the IST datetime pattern
+        # Both should contain a wall-clock datetime pattern
         import re
 
         datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"

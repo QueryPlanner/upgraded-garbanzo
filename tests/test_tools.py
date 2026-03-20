@@ -16,6 +16,7 @@ from agent.tools import (
     _parse_reminder_datetime,
     cancel_reminder,
     example_tool,
+    get_current_datetime,
     list_reminders,
     schedule_reminder,
 )
@@ -84,6 +85,21 @@ class TestExampleTool:
 
         # Verify logging occurred
         assert "Session state keys:" in caplog.text
+
+
+class TestGetCurrentDatetime:
+    """Tests for get_current_datetime tool."""
+
+    def test_returns_clock_fields(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        result = get_current_datetime(tool_context)  # type: ignore[arg-type]
+        assert "iso_datetime" in result
+        assert "time" in result
+        assert "date" in result
+        assert "weekday" in result
+        assert "timezone" in result
+        assert len(result["time"].split(":")) == 3
 
 
 class TestParseReminderDatetime:

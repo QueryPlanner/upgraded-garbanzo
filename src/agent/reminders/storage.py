@@ -7,12 +7,12 @@ sessions. Otherwise a local SQLite file under the agent data directory is used.
 import asyncio
 import logging
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg  # type: ignore[import-untyped]
 from pydantic import BaseModel
 
+from ..utils.app_timezone import now_utc
 from ..utils.config import get_data_dir
 from ..utils.pg_app_pool import get_shared_app_pool, postgres_dsn_from_environment
 
@@ -214,7 +214,7 @@ class ReminderStorage:
     async def get_due_reminders(self) -> list[Reminder]:
         """Reminders with trigger_time <= now and not yet sent."""
         await self.initialize()
-        now = datetime.now(UTC).isoformat()
+        now = now_utc().isoformat(timespec="seconds")
 
         if self._use_postgres:
             pool = self._pool

@@ -16,6 +16,13 @@ from .fitness import (
     get_fitness_storage,
 )
 from .reminders import Reminder, get_scheduler
+from .utils.app_timezone import (
+    format_stored_instant_for_display,
+    get_app_timezone,
+    naive_local_now,
+    now_utc,
+    utc_iso_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +50,36 @@ def example_tool(
     return {"status": "success", "message": message}
 
 
+def get_current_datetime(tool_context: ToolContext) -> dict[str, Any]:
+    """Return the current date and time in the app timezone, to the second.
+
+    Call this before scheduling relative reminders (e.g. \"in 10 minutes\") so the
+    model uses the same \"now\" as the server. Default timezone is India Standard
+    Time (Asia/Kolkata); override with AGENT_TIMEZONE.
+
+    Args:
+        tool_context: ADK ToolContext (unused; required for tool signature).
+
+    Returns:
+        ISO timestamp with offset, split date/time fields, and weekday.
+    """
+    _ = tool_context
+    tz = get_app_timezone()
+    now = datetime.now(tz)
+    tz_name = tz.key
+    return {
+        "timezone": tz_name,
+        "iso_datetime": now.isoformat(timespec="seconds"),
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M:%S"),
+        "weekday": now.strftime("%A"),
+        "hint": (
+            "Use this clock for reminders. Pass iso_datetime to schedule_reminder, "
+            "or a relative phrase like 'in 7 minutes' (this timezone)."
+        ),
+    }
+
+
 async def schedule_reminder(
     tool_context: ToolContext,
     message: str,
@@ -55,10 +92,10 @@ async def schedule_reminder(
     Args:
         tool_context: ADK ToolContext with user_id in state.
         message: The reminder message to send (max 500 characters).
-        reminder_datetime: When to send the reminder. Use format:
-            "YYYY-MM-DD HH:MM" (e.g., "2026-03-15 14:30")
-            or relative time like "in 30 minutes", "tomorrow at 9am",
-            "in 2 hours", "at 5pm today".
+        reminder_datetime: When to send the reminder (interpreted in India Standard
+            Time by default). Prefer calling get_current_datetime first, then either
+            pass its iso_datetime or a relative phrase: "in 30 minutes",
+            "tomorrow at 9am", "in 2 hours", or "YYYY-MM-DD HH:MM:SS".
 
     Returns:
         A dictionary with status, reminder_id, and confirmation message.
@@ -93,8 +130,7 @@ async def schedule_reminder(
             "message": "Reminder message too long (max 500 characters).",
         }
 
-    # Check if time is in the past
-    if trigger_time <= datetime.now(UTC):
+    if trigger_time <= now_utc():
         return {
             "status": "error",
             "message": "The reminder time must be in the future.",
@@ -109,15 +145,18 @@ async def schedule_reminder(
             trigger_time=trigger_time,
         )
 
-        formatted_time = trigger_time.strftime("%Y-%m-%d %H:%M")
+        display_time = format_stored_instant_for_display(utc_iso_seconds(trigger_time))
         logger.info(
-            f"Scheduled reminder {reminder_id} for user {user_id} at {formatted_time}"
+            "Scheduled reminder %s for user %s at %s (stored as UTC)",
+            reminder_id,
+            user_id,
+            utc_iso_seconds(trigger_time),
         )
 
         return {
             "status": "success",
             "reminder_id": reminder_id,
-            "message": f"Reminder scheduled for {formatted_time}. "
+            "message": f"Reminder scheduled for {display_time}. "
             f"I'll send you: '{message[:50]}{'...' if len(message) > 50 else ''}'",
         }
     except Exception as e:
@@ -225,46 +264,42 @@ async def cancel_reminder(
 
 
 def _parse_reminder_datetime(datetime_str: str) -> datetime:
-    """Parse a datetime string into a timezone-aware UTC datetime object.
+    """Parse natural-language or absolute datetimes in the app timezone, return UTC.
 
-    Uses dateparser for robust natural language parsing. Supports:
-    - Absolute: "2026-03-15 14:30", "March 15, 2026 at 2pm"
-    - Relative: "in 30 minutes", "tomorrow at 9am", "in 2 hours"
-    - Natural language: "next Monday at 5pm", "at 5pm today"
-
-    Args:
-        datetime_str: The datetime string to parse.
+    Relative phrases (e.g. \"in 5 minutes\") use the server's wall clock in the app
+    timezone (default Asia/Kolkata) so they match user expectations.
 
     Returns:
-        A timezone-aware datetime object in UTC.
-
-    Raises:
-        ValueError: If the string cannot be parsed.
+        Timezone-aware UTC datetime for storage and comparison.
     """
+    tz = get_app_timezone()
+    tz_name = tz.key
     parsed_time = dateparser.parse(
         datetime_str,
-        settings={"PREFER_DATES_FROM": "future", "TO_TIMEZONE": "UTC"},
+        settings={
+            "PREFER_DATES_FROM": "future",
+            "TIMEZONE": tz_name,
+            "TO_TIMEZONE": tz_name,
+            "RELATIVE_BASE": naive_local_now(),
+        },
     )
     if not parsed_time:
         raise ValueError(f"Could not parse datetime: {datetime_str}")
 
-    # Ensure the datetime is timezone-aware in UTC
     if parsed_time.tzinfo is None:
-        parsed_time = parsed_time.replace(tzinfo=UTC)
+        parsed_time = parsed_time.replace(tzinfo=tz)
     else:
-        # Convert to UTC if it has a different timezone
-        parsed_time = parsed_time.astimezone(UTC)
+        parsed_time = parsed_time.astimezone(tz)
 
-    return parsed_time
+    return parsed_time.astimezone(UTC)
 
 
 def _format_reminder(reminder: Reminder) -> dict[str, Any]:
-    """Format a reminder for display."""
-    trigger_dt = datetime.fromisoformat(reminder.trigger_time)
+    """Format a reminder for display (trigger time in app timezone, with seconds)."""
     return {
         "id": reminder.id,
         "message": reminder.message,
-        "trigger_time": trigger_dt.strftime("%Y-%m-%d %H:%M"),
+        "trigger_time": format_stored_instant_for_display(reminder.trigger_time),
         "is_sent": reminder.is_sent,
     }
 
@@ -283,8 +318,8 @@ def _get_user_id(tool_context: ToolContext) -> str | None:
 
 
 def _get_today_date() -> str:
-    """Get today's date in YYYY-MM-DD format."""
-    return datetime.now(UTC).strftime("%Y-%m-%d")
+    """Get today's date in YYYY-MM-DD format (app timezone, default IST)."""
+    return datetime.now(get_app_timezone()).strftime("%Y-%m-%d")
 
 
 async def add_calories(
@@ -341,7 +376,7 @@ async def add_calories(
         fat=fat,
         meal_type=meal_type_enum,
         notes=notes,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(get_app_timezone()).isoformat(timespec="seconds"),
     )
 
     try:
@@ -511,7 +546,7 @@ async def log_workout(
         weight=weight,
         distance_km=distance_km,
         notes=notes,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(get_app_timezone()).isoformat(timespec="seconds"),
     )
 
     try:

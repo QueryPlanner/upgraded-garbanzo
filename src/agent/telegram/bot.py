@@ -18,7 +18,6 @@ import contextlib
 import logging
 import os
 import sys
-from datetime import datetime
 
 from dotenv import load_dotenv
 from telegram import BotCommand, Update
@@ -32,6 +31,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+from ..utils.app_timezone import format_stored_instant_for_display
 
 # Load environment variables from .env file
 load_dotenv()
@@ -145,8 +146,7 @@ async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Format reminders list
         lines = ["⏰ *Your Scheduled Reminders:*\n"]
         for r in reminders:
-            trigger_dt = datetime.fromisoformat(r.trigger_time)
-            time_str = trigger_dt.strftime("%Y-%m-%d %H:%M")
+            time_str = format_stored_instant_for_display(r.trigger_time)
             msg_preview = r.message[:40] + "..." if len(r.message) > 40 else r.message
             lines.append(f"• *#{r.id}* - {time_str}\n  _{msg_preview}_")
 

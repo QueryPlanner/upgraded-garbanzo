@@ -5,7 +5,7 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from google.adk.agents import LlmAgent
@@ -15,6 +15,8 @@ from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.adk.runners import InMemoryRunner, Runner
 from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai import types
+
+from ..utils.app_timezone import format_stored_instant_for_display
 
 if TYPE_CHECKING:
     pass
@@ -263,8 +265,11 @@ class TelegramHandler:
         Returns:
             The agent's personalized response to the reminder.
         """
-        # Format the scheduled time for display
-        time_str = scheduled_time.strftime("%Y-%m-%d %H:%M UTC")
+        if scheduled_time.tzinfo is None:
+            scheduled_time = scheduled_time.replace(tzinfo=UTC)
+        time_str = format_stored_instant_for_display(
+            scheduled_time.astimezone(UTC).isoformat(timespec="seconds")
+        )
 
         # Create the reminder prompt using the template
         prompt = REMINDER_PROMPT_TEMPLATE.format(

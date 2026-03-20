@@ -408,6 +408,7 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "RELOAD_AGENTS",
         "AGENT_ENGINE",
         "DATABASE_URL",
+        "AGENT_TIMEZONE",
         "ARTIFACT_SERVICE_URI",
         "ALLOW_ORIGINS",
         "HOST",
