@@ -74,7 +74,10 @@ def return_description_root() -> str:
     return description
 
 
-def return_instruction_root() -> str:
+def return_instruction_root(ctx: ReadonlyContext | None = None) -> str:
+    """Return the root instruction, reloading context files on each call."""
+    _ = ctx
+
     # Load context files (identity, soul, user preferences)
     context = load_context()
 
@@ -106,8 +109,10 @@ all experience levels.
 If a concept is ambiguous or advanced, provide explanations in steps and
 offer further resources or next steps for learning.
 
-Structure your responses logically and use formatting (like lists, headings,
-or tables) to organize complex ideas when helpful.
+Structure your responses logically with short paragraphs, headings, and bullet
+lists when helpful.
+
+Do not use markdown tables.
 
 Never use LaTeX notation or math delimiters like `$...$`, `\\(...\\)`,
 or `\\[...\\]`. For formulas, use plain text or simple Unicode symbols

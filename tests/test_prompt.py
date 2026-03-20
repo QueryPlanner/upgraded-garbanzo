@@ -65,6 +65,12 @@ class TestReturnInstructionRoot:
 
         assert instruction1 == instruction2
 
+    def test_instruction_explicitly_disallows_tables(self) -> None:
+        """Test that prompt guidance bans markdown tables."""
+        instruction = return_instruction_root()
+
+        assert "Do not use markdown tables." in instruction
+
 
 class TestReturnGlobalInstruction:
     """Tests for return_global_instruction InstructionProvider function."""

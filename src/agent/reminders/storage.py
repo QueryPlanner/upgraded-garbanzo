@@ -37,8 +37,11 @@ class Reminder(BaseModel):
         id: Unique identifier (auto-generated).
         user_id: Telegram chat ID of the user who set the reminder.
         message: The reminder message to send.
-        trigger_time: When to send the reminder (ISO format string).
+        trigger_time: Next time to send the reminder (ISO format string).
         is_sent: Whether the reminder has been sent.
+        recurrence_rule: Normalized cron rule for recurring reminders.
+        recurrence_text: Human-readable recurrence description.
+        timezone_name: IANA timezone used for recurring schedule calculation.
         created_at: When the reminder was created (ISO format string).
     """
 
@@ -47,7 +50,15 @@ class Reminder(BaseModel):
     message: str
     trigger_time: str  # ISO format datetime string
     is_sent: bool = False
+    recurrence_rule: str | None = None
+    recurrence_text: str | None = None
+    timezone_name: str | None = None
     created_at: str  # ISO format datetime string
+
+    @property
+    def is_recurring(self) -> bool:
+        """True when this reminder will be rescheduled after firing."""
+        return bool(self.recurrence_rule)
 
 
 class ReminderStorage:
@@ -104,9 +115,13 @@ class ReminderStorage:
                 message      TEXT    NOT NULL,
                 trigger_time TEXT    NOT NULL,
                 is_sent      INTEGER NOT NULL DEFAULT 0,
+                recurrence_rule TEXT,
+                recurrence_text TEXT,
+                timezone_name TEXT,
                 created_at   TEXT    NOT NULL
             )
         """)
+        await self._migrate_schema(conn)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_trigger_time_sent
             ON reminders (trigger_time, is_sent)
@@ -117,6 +132,26 @@ class ReminderStorage:
         """)
         await conn.commit()
 
+    async def _migrate_schema(self, conn: aiosqlite.Connection) -> None:
+        """Add new columns for older reminder databases."""
+        cursor = await conn.execute("PRAGMA table_info(reminders)")
+        rows = await cursor.fetchall()
+        existing_columns = {row["name"] for row in rows}
+
+        required_columns = {
+            "recurrence_rule": "TEXT",
+            "recurrence_text": "TEXT",
+            "timezone_name": "TEXT",
+        }
+
+        for column_name, column_type in required_columns.items():
+            if column_name in existing_columns:
+                continue
+
+            await conn.execute(
+                f"ALTER TABLE reminders ADD COLUMN {column_name} {column_type}"
+            )
+
     async def add_reminder(self, reminder: Reminder) -> int:
         """Insert a reminder and return its new row ID."""
         await self.initialize()
@@ -124,14 +159,26 @@ class ReminderStorage:
         cursor = await conn.execute(
             """
             INSERT INTO reminders
-                (user_id, message, trigger_time, is_sent, created_at)
-            VALUES (?, ?, ?, ?, ?)
+                (
+                    user_id,
+                    message,
+                    trigger_time,
+                    is_sent,
+                    recurrence_rule,
+                    recurrence_text,
+                    timezone_name,
+                    created_at
+                )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 reminder.user_id,
                 reminder.message,
                 reminder.trigger_time,
                 int(reminder.is_sent),
+                reminder.recurrence_rule,
+                reminder.recurrence_text,
+                reminder.timezone_name,
                 reminder.created_at,
             ),
         )
@@ -153,7 +200,16 @@ class ReminderStorage:
         now = now_utc().isoformat(timespec="seconds")
         cursor = await conn.execute(
             """
-            SELECT id, user_id, message, trigger_time, is_sent, created_at
+            SELECT
+                id,
+                user_id,
+                message,
+                trigger_time,
+                is_sent,
+                recurrence_rule,
+                recurrence_text,
+                timezone_name,
+                created_at
             FROM reminders
             WHERE trigger_time <= ? AND is_sent = 0
             ORDER BY trigger_time ASC
@@ -173,6 +229,27 @@ class ReminderStorage:
         await conn.commit()
         logger.info("Marked reminder %s as sent", reminder_id)
 
+    async def reschedule_reminder(
+        self, reminder_id: int, next_trigger_time: str
+    ) -> None:
+        """Move a recurring reminder to its next scheduled fire time."""
+        await self.initialize()
+        conn = self._require_conn()
+        await conn.execute(
+            """
+            UPDATE reminders
+            SET trigger_time = ?, is_sent = 0
+            WHERE id = ?
+            """,
+            (next_trigger_time, reminder_id),
+        )
+        await conn.commit()
+        logger.info(
+            "Rescheduled recurring reminder %s for %s",
+            reminder_id,
+            next_trigger_time,
+        )
+
     async def get_user_reminders(
         self, user_id: str, include_sent: bool = False
     ) -> list[Reminder]:
@@ -182,7 +259,16 @@ class ReminderStorage:
         if include_sent:
             cursor = await conn.execute(
                 """
-                SELECT id, user_id, message, trigger_time, is_sent, created_at
+                SELECT
+                    id,
+                    user_id,
+                    message,
+                    trigger_time,
+                    is_sent,
+                    recurrence_rule,
+                    recurrence_text,
+                    timezone_name,
+                    created_at
                 FROM reminders WHERE user_id = ?
                 ORDER BY trigger_time ASC
                 """,
@@ -191,7 +277,16 @@ class ReminderStorage:
         else:
             cursor = await conn.execute(
                 """
-                SELECT id, user_id, message, trigger_time, is_sent, created_at
+                SELECT
+                    id,
+                    user_id,
+                    message,
+                    trigger_time,
+                    is_sent,
+                    recurrence_rule,
+                    recurrence_text,
+                    timezone_name,
+                    created_at
                 FROM reminders WHERE user_id = ? AND is_sent = 0
                 ORDER BY trigger_time ASC
                 """,
@@ -225,6 +320,9 @@ class ReminderStorage:
             message=row["message"],
             trigger_time=row["trigger_time"],
             is_sent=bool(row["is_sent"]),
+            recurrence_rule=row["recurrence_rule"],
+            recurrence_text=row["recurrence_text"],
+            timezone_name=row["timezone_name"],
             created_at=row["created_at"],
         )
 

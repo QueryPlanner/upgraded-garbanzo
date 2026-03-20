@@ -1,5 +1,6 @@
 """Unit tests for reminder storage."""
 
+import sqlite3
 import tempfile
 from collections.abc import AsyncGenerator
 from datetime import datetime
@@ -182,6 +183,59 @@ class TestReminderStorage:
         # Verify it still exists
         reminders = await storage.get_user_reminders("user1")
         assert len(reminders) == 1
+
+    @pytest.mark.asyncio
+    async def test_recurring_fields_round_trip(self, storage: ReminderStorage) -> None:
+        """Test recurring reminder metadata survives storage round-trip."""
+        reminder = Reminder(
+            user_id="user1",
+            message="Stretch",
+            trigger_time="2026-03-15T14:30:00+00:00",
+            recurrence_rule="*/15 * * * *",
+            recurrence_text="every 15 minute(s)",
+            timezone_name="Asia/Kolkata",
+            created_at=datetime.now().isoformat(),
+        )
+
+        reminder_id = await storage.add_reminder(reminder)
+        reminders = await storage.get_user_reminders("user1")
+
+        assert reminder_id > 0
+        assert len(reminders) == 1
+        assert reminders[0].is_recurring is True
+        assert reminders[0].recurrence_rule == "*/15 * * * *"
+        assert reminders[0].recurrence_text == "every 15 minute(s)"
+        assert reminders[0].timezone_name == "Asia/Kolkata"
+
+    @pytest.mark.asyncio
+    async def test_initialize_migrates_existing_schema(self, tmp_path: Path) -> None:
+        """Test initialize adds recurrence columns to older reminder databases."""
+        db_path = tmp_path / "legacy-reminders.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""
+                CREATE TABLE reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    trigger_time TEXT NOT NULL,
+                    is_sent INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+
+        storage = ReminderStorage(db_path=db_path)
+        await storage.initialize()
+
+        assert storage._conn is not None
+        cursor = await storage._conn.execute("PRAGMA table_info(reminders)")
+        columns = {row["name"] for row in await cursor.fetchall()}
+
+        assert "recurrence_rule" in columns
+        assert "recurrence_text" in columns
+        assert "timezone_name" in columns
+
+        await storage.close()
 
 
 class TestCloseSharedReminderStorage:

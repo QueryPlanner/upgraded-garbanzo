@@ -111,7 +111,7 @@ root_agent = LlmAgent(
     before_agent_callback=logging_callbacks.before_agent,
     after_agent_callback=[logging_callbacks.after_agent, add_session_to_memory],
     model=model,
-    instruction=return_instruction_root(),
+    instruction=return_instruction_root,
     tools=[
         # PreloadMemoryTool(),
         example_tool,

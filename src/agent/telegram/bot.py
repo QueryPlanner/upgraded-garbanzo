@@ -78,7 +78,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/reset - Clear conversation and start fresh\n"
         "/reminders - List your scheduled reminders\n\n"
         "*Reminders:* Ask me to remind you about things!\n"
-        'Example: "Remind me in 30 minutes to take a break"'
+        'Examples: "Remind me in 30 minutes to take a break" or '
+        '"Remind me every Monday at 8:30 to plan the week"'
     )
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
@@ -102,7 +103,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "You can ask me to set reminders like:\n"
         '• "Remind me to call mom in 30 minutes"\n'
         '• "Remind me about the meeting at 3pm today"\n'
-        '• "Remind me tomorrow at 9am to check emails"'
+        '• "Remind me tomorrow at 9am to check emails"\n'
+        '• "Remind me every 15 minutes to stretch"\n'
+        '• "Remind me every Monday at 8:30 to plan the week"'
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -147,7 +150,13 @@ async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for r in reminders:
             time_str = format_stored_instant_for_display(r.trigger_time)
             msg_preview = r.message[:40] + "..." if len(r.message) > 40 else r.message
-            lines.append(f"• *#{r.id}* - {time_str}\n  _{msg_preview}_")
+            reminder_kind = "Recurring" if r.is_recurring else "One-time"
+            reminder_lines = [f"• *#{r.id}* - {reminder_kind}"]
+            reminder_lines.append(f"  Next: {time_str}")
+            if r.recurrence_text:
+                reminder_lines.append(f"  Repeats: {r.recurrence_text}")
+            reminder_lines.append(f"  _{msg_preview}_")
+            lines.append("\n".join(reminder_lines))
 
         lines.append('\nTo cancel, say: "Cancel reminder #N"')
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
