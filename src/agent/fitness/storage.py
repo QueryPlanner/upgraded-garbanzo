@@ -46,7 +46,7 @@ class FitnessStorage:
             "SELECT id, user_id, date, food_item, calories, protein, carbs, fat, "
             "meal_type, notes, created_at FROM agent_calories"
         )
-        order = ' ORDER BY date DESC, created_at DESC'
+        order = " ORDER BY date DESC, created_at DESC"
 
         conditions = ["user_id = $1"]
         params: list[str] = [user_id]
@@ -79,7 +79,7 @@ class FitnessStorage:
             "created_at "
             "FROM agent_workouts"
         )
-        order = ' ORDER BY date DESC, created_at DESC'
+        order = " ORDER BY date DESC, created_at DESC"
 
         conditions = ["user_id = $1"]
         params: list[str | None] = [user_id]
@@ -264,7 +264,9 @@ class FitnessStorage:
     ) -> list[CalorieEntry]:
         await self.initialize()
         pool = self._require_pool()
-        rows = await self._fetch_calorie_rows_postgres(pool, user_id, start_date, end_date)
+        rows = await self._fetch_calorie_rows_postgres(
+            pool, user_id, start_date, end_date
+        )
         return [self._record_to_calorie_entry(r) for r in rows]
 
     async def get_calorie_stats(
@@ -426,13 +428,19 @@ class FitnessStorage:
         pool = self._require_pool()
         if entry_type == "calorie":
             row = await pool.fetchrow(
-                "DELETE FROM agent_calories WHERE id = $1 AND user_id = $2 RETURNING id",
+                (
+                    "DELETE FROM agent_calories "
+                    "WHERE id = $1 AND user_id = $2 RETURNING id"
+                ),
                 entry_id,
                 user_id,
             )
         else:
             row = await pool.fetchrow(
-                "DELETE FROM agent_workouts WHERE id = $1 AND user_id = $2 RETURNING id",
+                (
+                    "DELETE FROM agent_workouts "
+                    "WHERE id = $1 AND user_id = $2 RETURNING id"
+                ),
                 entry_id,
                 user_id,
             )

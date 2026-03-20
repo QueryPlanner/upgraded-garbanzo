@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.fitness import ExerciseType, FitnessStorage, WorkoutEntry, get_fitness_storage
+from agent.fitness import (
+    ExerciseType,
+    FitnessStorage,
+    WorkoutEntry,
+    get_fitness_storage,
+)
 
 
 def _make_pool() -> tuple[AsyncMock, AsyncMock]:
@@ -29,11 +34,16 @@ class TestFitnessStorageInit:
         storage = FitnessStorage()
 
         with (
-            patch("agent.fitness.storage.postgres_dsn_from_environment", return_value=None),
-            patch("agent.fitness.storage.get_shared_app_pool", AsyncMock(return_value=None)),
+            patch(
+                "agent.fitness.storage.postgres_dsn_from_environment", return_value=None
+            ),
+            patch(
+                "agent.fitness.storage.get_shared_app_pool",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(RuntimeError, match="requires DATABASE_URL"),
         ):
-            with pytest.raises(RuntimeError, match="requires DATABASE_URL"):
-                await storage.initialize()
+            await storage.initialize()
 
     @pytest.mark.asyncio
     async def test_initialize_creates_tables_and_is_idempotent(self) -> None:
@@ -55,9 +65,17 @@ class TestFitnessStorageInit:
         assert storage._initialized is True
         assert get_pool.await_count == 1
 
-        executed_statements = [call.args[0] for call in mock_conn.execute.await_args_list]
-        assert any('ADD COLUMN IF NOT EXISTS "set"' in statement for statement in executed_statements)
-        assert any("DROP COLUMN IF EXISTS sets" in statement for statement in executed_statements)
+        executed_statements = [
+            call.args[0] for call in mock_conn.execute.await_args_list
+        ]
+        assert any(
+            'ADD COLUMN IF NOT EXISTS "set"' in statement
+            for statement in executed_statements
+        )
+        assert any(
+            "DROP COLUMN IF EXISTS sets" in statement
+            for statement in executed_statements
+        )
 
 
 class TestWorkoutStats:
@@ -79,7 +97,9 @@ class TestWorkoutStats:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch.object(storage, "get_workout_entries", AsyncMock(return_value=[entry])):
+        with patch.object(
+            storage, "get_workout_entries", AsyncMock(return_value=[entry])
+        ):
             stats = await storage.get_workout_stats("test_user")
 
         assert stats["total_workouts"] == 1
