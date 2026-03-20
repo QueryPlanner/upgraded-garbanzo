@@ -159,9 +159,7 @@ class TelegramHandler:
             # If user_id is missing from session state, delete and recreate
             # (modifying session.state in memory doesn't persist to database)
             if "user_id" not in session.state:
-                logger.info(
-                    f"Session missing user_id, recreating for user={user_id}"
-                )
+                logger.info(f"Session missing user_id, recreating for user={user_id}")
                 try:
                     await self.runner.session_service.delete_session(
                         app_name=self.app_name,
