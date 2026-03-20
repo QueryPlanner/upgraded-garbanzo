@@ -156,10 +156,28 @@ class TelegramHandler:
             )
             logger.info(f"Created new session with user_id={user_id}")
         else:
-            # Update existing session state with user_id if not present
+            # If user_id is missing from session state, delete and recreate
+            # (modifying session.state in memory doesn't persist to database)
             if "user_id" not in session.state:
-                session.state["user_id"] = user_id
-                logger.info(f"Updated session state with user_id={user_id}")
+                logger.info(f"Session missing user_id, recreating for user={user_id}")
+                try:
+                    await self.runner.session_service.delete_session(
+                        app_name=self.app_name,
+                        user_id=user_id,
+                        session_id=effective_session_id,
+                    )
+                except Exception:
+                    logger.warning(
+                        f"Could not delete session for user={user_id}, "
+                        f"session={effective_session_id}. Proceeding with recreation."
+                    )
+                session = await self.runner.session_service.create_session(
+                    app_name=self.app_name,
+                    user_id=user_id,
+                    session_id=effective_session_id,
+                    state={"user_id": user_id},
+                )
+                logger.info(f"Recreated session with user_id={user_id}")
 
         logger.info(f"Session state keys: {list(session.state.keys())}")
 
@@ -225,11 +243,12 @@ class TelegramHandler:
             )
 
         try:
-            # The crucial part is creating a new session.
+            # The crucial part is creating a new session with initial state.
             await self.runner.session_service.create_session(
                 app_name=self.app_name,
                 user_id=user_id,
                 session_id=effective_session_id,
+                state={"user_id": user_id},
             )
             logger.info(
                 f"Created new session for user={user_id}, "
