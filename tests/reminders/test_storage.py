@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from agent.reminders.storage import Reminder, ReminderStorage
+from agent.reminders.storage import (
+    Reminder,
+    ReminderStorage,
+    close_shared_reminder_storage,
+    get_storage,
+)
 
 
 @pytest.fixture
@@ -177,3 +182,20 @@ class TestReminderStorage:
         # Verify it still exists
         reminders = await storage.get_user_reminders("user1")
         assert len(reminders) == 1
+
+
+class TestCloseSharedReminderStorage:
+    """Teardown of the process-wide singleton (pytest / clean exit)."""
+
+    @pytest.mark.asyncio
+    async def test_close_clears_singleton(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+        await close_shared_reminder_storage()
+        first = get_storage()
+        await first.initialize()
+        await close_shared_reminder_storage()
+        second = get_storage()
+        assert second is not first
+        assert second._conn is None

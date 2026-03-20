@@ -425,3 +425,17 @@ def get_fitness_storage() -> FitnessStorage:
     if _storage is None:
         _storage = FitnessStorage()
     return _storage
+
+
+async def close_shared_fitness_storage() -> None:
+    """Close the singleton connection and clear the global instance.
+
+    aiosqlite keeps a non-daemon worker thread per open connection. Call this
+    before process exit (e.g. end of pytest) so the interpreter is not blocked
+    in ``threading._shutdown()``.
+    """
+    global _storage
+    if _storage is None:
+        return
+    await _storage.close()
+    _storage = None

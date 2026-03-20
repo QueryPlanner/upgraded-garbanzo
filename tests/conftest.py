@@ -1,11 +1,37 @@
 """Shared pytest fixtures for all tests."""
 
+import asyncio
+import logging
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+logger = logging.getLogger(__name__)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # noqa: ARG001
+    """Close process-wide aiosqlite singletons so worker threads exit.
+
+    ``get_fitness_storage()`` and ``get_storage()`` open aiosqlite connections
+    backed by non-daemon threads. Tests that call ``initialize()`` leave those
+    threads alive; without an explicit close, Python blocks in
+    ``threading._shutdown()`` and pytest appears hung after reporting passes.
+    """
+
+    async def _close_shared_stores() -> None:
+        from agent.fitness.storage import close_shared_fitness_storage
+        from agent.reminders.storage import close_shared_reminder_storage
+
+        await close_shared_fitness_storage()
+        await close_shared_reminder_storage()
+
+    try:
+        asyncio.run(_close_shared_stores())
+    except RuntimeError as exc:
+        logger.debug("Skipping shared SQLite teardown (asyncio.run failed): %s", exc)
 
 
 # ADK Callback Mock Objects for testing callbacks

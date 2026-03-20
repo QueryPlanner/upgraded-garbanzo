@@ -15,6 +15,7 @@ from agent.fitness import (
     WorkoutEntry,
     get_fitness_storage,
 )
+from agent.fitness.storage import close_shared_fitness_storage
 
 
 def _now() -> str:
@@ -309,3 +310,20 @@ class TestGetFitnessStorage:
 
         with patch("agent.fitness.storage._storage", None):
             assert get_fitness_storage() is get_fitness_storage()
+
+
+class TestCloseSharedFitnessStorage:
+    """Teardown of the process-wide singleton (pytest / clean exit)."""
+
+    @pytest.mark.asyncio
+    async def test_close_clears_singleton(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+        await close_shared_fitness_storage()
+        first = get_fitness_storage()
+        await first.initialize()
+        await close_shared_fitness_storage()
+        second = get_fitness_storage()
+        assert second is not first
+        assert second._conn is None
