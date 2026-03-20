@@ -71,6 +71,14 @@ class TestReturnInstructionRoot:
 
         assert "Do not use markdown tables." in instruction
 
+    def test_instruction_explains_recurring_reminder_contract(self) -> None:
+        """Test that prompt explains cron-only recurrence and delivery behavior."""
+        instruction = return_instruction_root()
+
+        assert "5-field" in instruction
+        assert "cron expression" in instruction
+        assert "Do not call schedule_reminder again" in instruction
+
 
 class TestReturnGlobalInstruction:
     """Tests for return_global_instruction InstructionProvider function."""

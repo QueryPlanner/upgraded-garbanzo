@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+REMINDER_SESSION_SUFFIX = ":scheduled-reminder"
+
 
 def _telegram_latency_log_enabled() -> bool:
     """True when TELEGRAM_LATENCY_LOG requests structured pre-LLM timing logs."""
@@ -35,15 +37,22 @@ def _telegram_latency_log_enabled() -> bool:
 # Template for injecting reminders into the agent's context
 REMINDER_PROMPT_TEMPLATE = """[SCHEDULED REMINDER]
 
-Send the user a short message that delivers only this reminder (scheduled for
-{scheduled_time}):
+This reminder has already been scheduled and is firing now.
+
+Scheduled time: {scheduled_time}
+
+Reminder instruction:
 
 "{reminder_message}"
 
-Rules: Your reply is what they see in Telegram. Stay on-topic: remind them of the
-above, briefly and in a natural tone. Do not invite unrelated tasks, logging,
-recipes, tips, or “let me know if you need anything else” — no add-ons beyond the
-reminder itself."""
+Rules:
+- Your reply is the final Telegram message the user sees right now.
+- Do not call tools.
+- Do not schedule, reschedule, validate, or discuss reminder times.
+- Do not say the scheduled time is in the past. The reminder is already firing.
+- If the reminder instruction asks for generated content, generate it directly.
+- Stay on-topic and do not add unrelated tasks, logging, recipes, tips, or
+  “let me know if you need anything else”."""
 
 
 class TelegramHandler:
@@ -321,10 +330,11 @@ class TelegramHandler:
 
         Args:
             user_id: Unique identifier for the user (e.g., Telegram chat ID).
-            reminder_message: The original reminder message the user set.
+            reminder_message: The stored reminder instruction to fulfill now.
             scheduled_time: When the reminder was scheduled for.
             session_id: Optional session ID for conversation continuity.
-                If not provided, user_id is used as session_id.
+                If not provided, reminder delivery uses a dedicated reminder
+                session so it does not inherit the user's scheduling chat.
 
         Returns:
             The agent's personalized response to the reminder.
@@ -345,14 +355,25 @@ class TelegramHandler:
             f"Processing reminder for user {user_id}: '{reminder_message[:30]}...'"
         )
 
+        effective_session_id = session_id or self._build_reminder_session_id(user_id)
+        if session_id is None:
+            await self.reset_session(
+                user_id=user_id,
+                session_id=effective_session_id,
+            )
+
         # Process through the agent using the existing message flow
         response = await self.process_message(
             user_id=user_id,
             message=prompt,
-            session_id=session_id,
+            session_id=effective_session_id,
         )
 
         return response
+
+    def _build_reminder_session_id(self, user_id: str) -> str:
+        """Return the dedicated session used for reminder delivery."""
+        return f"{user_id}{REMINDER_SESSION_SUFFIX}"
 
 
 # Global handler instance for backwards compatibility with module-level functions

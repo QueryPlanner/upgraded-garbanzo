@@ -1,7 +1,6 @@
 """Custom tools for the LLM agent."""
 
 import logging
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,29 +31,11 @@ from .utils.app_timezone import (
 
 logger = logging.getLogger(__name__)
 
-WEEKDAY_TO_CRON = {
-    "mon": "mon",
-    "monday": "mon",
-    "tue": "tue",
-    "tues": "tue",
-    "tuesday": "tue",
-    "wed": "wed",
-    "wednesday": "wed",
-    "thu": "thu",
-    "thur": "thu",
-    "thurs": "thu",
-    "thursday": "thu",
-    "fri": "fri",
-    "friday": "fri",
-    "sat": "sat",
-    "saturday": "sat",
-    "sun": "sun",
-    "sunday": "sun",
-}
 SUPPORTED_RECURRENCE_MESSAGE = (
-    "Recurring reminders support values like 'daily at 9am', "
-    "'weekly on monday at 8:30', 'every 15 minutes', or a "
-    "5-field cron expression like '*/15 * * * *'."
+    "Recurring reminders must use a 5-field cron expression in the app "
+    "timezone, for example '* * * * *' for every minute, "
+    "'*/15 * * * *' for every 15 minutes, or '30 8 * * 1' for Mondays "
+    "at 08:30."
 )
 
 
@@ -119,18 +100,26 @@ async def schedule_reminder(
 ) -> dict[str, Any]:
     """Schedule a reminder to be sent at a specific time.
 
-    The reminder will be sent as a Telegram message to the user.
+    The reminder will be delivered through the agent as a Telegram message.
+    The stored message is shown back to the agent when the reminder fires, so
+    ``message`` should be a self-contained instruction for what the user should
+    receive at delivery time. If the reminder should produce fresh generated
+    content, describe that outcome directly in ``message`` instead of writing
+    scheduling meta text.
 
     Args:
         tool_context: ADK ToolContext with user_id in state.
-        message: The reminder message to send (max 500 characters).
-        reminder_datetime: For one-time reminders, when to fire in the app local
-            timezone (default IST / Asia/Kolkata; set AGENT_TIMEZONE to change).
-            For recurring reminders, this is optional and can be used as the
-            anchor time/day when recurrence omits those details.
-        recurrence: Optional recurring schedule. Supports friendly values like
-            'daily at 9am', 'weekly on monday at 8:30', 'every 15 minutes',
-            or a five-field cron expression like '*/15 * * * *'.
+        message: Self-contained delivery instruction for the future reminder
+            (max 500 characters). The fired reminder passes it back through the
+            agent to generate the final user-facing message.
+        reminder_datetime: For one-time reminders, when to fire in the app
+            local timezone (default IST / Asia/Kolkata; set AGENT_TIMEZONE to
+            change). Use wall-clock strings such as '2026-03-15 14:30', the
+            ``iso_datetime`` from ``get_current_datetime``, or relative phrases
+            like 'in 30 minutes' or 'tomorrow at 9am'.
+        recurrence: Optional recurring schedule as a 5-field cron expression in
+            the app timezone. Translate user cadence into cron before calling
+            this tool. Examples: '* * * * *', '*/15 * * * *', '30 8 * * 1'.
 
     Returns:
         A dictionary with status, reminder_id, and confirmation message.
@@ -390,15 +379,16 @@ def _build_reminder_schedule(
             "timezone_name": None,
         }
 
-    recurring_schedule = _parse_recurring_schedule(
-        recurrence=normalized_recurrence,
-        reminder_datetime=reminder_datetime,
-    )
-    reference_time = _build_recurrence_reference_time(reminder_datetime)
+    if reminder_datetime:
+        raise ValueError(
+            "Recurring reminders use recurrence only. Omit reminder_datetime "
+            "and pass a 5-field cron expression. " + SUPPORTED_RECURRENCE_MESSAGE
+        )
+
+    recurring_schedule = _parse_recurring_schedule(normalized_recurrence)
     next_trigger_time = get_next_trigger_time(
         recurring_schedule.cron_expression,
         recurring_schedule.timezone_name,
-        reference_time=reference_time,
     )
 
     return {
@@ -409,173 +399,23 @@ def _build_reminder_schedule(
     }
 
 
-def _parse_recurring_schedule(
-    recurrence: str,
-    reminder_datetime: str | None,
-) -> RecurringSchedule:
-    """Parse friendly recurrence text into a normalized cron schedule."""
+def _parse_recurring_schedule(recurrence: str) -> RecurringSchedule:
+    """Validate a cron-style recurring schedule for reminder storage."""
     timezone_name = get_app_timezone().key
     normalized_recurrence = " ".join(recurrence.strip().split())
-    lower_recurrence = normalized_recurrence.lower()
-
-    if _looks_like_cron_expression(normalized_recurrence):
+    try:
         cron_expression = validate_cron_expression(normalized_recurrence, timezone_name)
-        return RecurringSchedule(
-            cron_expression=cron_expression,
-            description=f"cron: {cron_expression}",
-            timezone_name=timezone_name,
-        )
+    except ValueError as error:
+        raise ValueError(
+            "Could not understand the recurring schedule. "
+            + SUPPORTED_RECURRENCE_MESSAGE
+        ) from error
 
-    minutes_match = re.fullmatch(r"every (\d+) minutes?", lower_recurrence)
-    if minutes_match:
-        interval_minutes = int(minutes_match.group(1))
-        if interval_minutes < 1 or interval_minutes > 59:
-            raise ValueError("Minute-based recurring reminders must use 1-59 minutes.")
-
-        minute_field = "*" if interval_minutes == 1 else f"*/{interval_minutes}"
-        return RecurringSchedule(
-            cron_expression=f"{minute_field} * * * *",
-            description=f"every {interval_minutes} minute(s)",
-            timezone_name=timezone_name,
-        )
-
-    daily_match = re.fullmatch(r"(?:daily|every day)(?: at (.+))?", lower_recurrence)
-    if daily_match:
-        hour, minute = _resolve_schedule_time(daily_match.group(1), reminder_datetime)
-        return RecurringSchedule(
-            cron_expression=f"{minute} {hour} * * *",
-            description=f"daily at {_format_clock_time(hour, minute)}",
-            timezone_name=timezone_name,
-        )
-
-    weekday_match = re.fullmatch(
-        r"every (mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|"
-        r"fri(?:day)?|sat(?:urday)?|sun(?:day)?)(?: at (.+))?",
-        lower_recurrence,
+    return RecurringSchedule(
+        cron_expression=cron_expression,
+        description=f"cron: {cron_expression}",
+        timezone_name=timezone_name,
     )
-    if weekday_match:
-        cron_weekday = _normalize_weekday_token(weekday_match.group(1))
-        hour, minute = _resolve_schedule_time(weekday_match.group(2), reminder_datetime)
-        return RecurringSchedule(
-            cron_expression=f"{minute} {hour} * * {cron_weekday}",
-            description=(
-                f"every {cron_weekday.title()} at {_format_clock_time(hour, minute)}"
-            ),
-            timezone_name=timezone_name,
-        )
-
-    weekly_match = re.fullmatch(
-        r"(?:weekly|every week)(?: on "
-        r"(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|"
-        r"fri(?:day)?|sat(?:urday)?|sun(?:day)?))?(?: at (.+))?",
-        lower_recurrence,
-    )
-    if weekly_match:
-        cron_weekday = _resolve_schedule_day(
-            weekday_text=weekly_match.group(1),
-            reminder_datetime=reminder_datetime,
-        )
-        hour, minute = _resolve_schedule_time(weekly_match.group(2), reminder_datetime)
-        return RecurringSchedule(
-            cron_expression=f"{minute} {hour} * * {cron_weekday}",
-            description=(
-                f"weekly on {cron_weekday.title()} at "
-                f"{_format_clock_time(hour, minute)}"
-            ),
-            timezone_name=timezone_name,
-        )
-
-    raise ValueError(
-        "Could not understand the recurring schedule. " + SUPPORTED_RECURRENCE_MESSAGE
-    )
-
-
-def _build_recurrence_reference_time(
-    reminder_datetime: str | None,
-) -> datetime | None:
-    """Use a provided anchor time as the first recurring schedule reference."""
-    if not reminder_datetime:
-        return None
-    return _parse_reminder_datetime(reminder_datetime)
-
-
-def _resolve_schedule_time(
-    time_text: str | None,
-    reminder_datetime: str | None,
-) -> tuple[int, int]:
-    """Resolve a recurring time from explicit text or the anchor datetime."""
-    if time_text:
-        parsed_time = _parse_local_time(time_text)
-        return parsed_time.hour, parsed_time.minute
-
-    if reminder_datetime:
-        anchor_time = _parse_reminder_datetime(reminder_datetime).astimezone(
-            get_app_timezone()
-        )
-        return anchor_time.hour, anchor_time.minute
-
-    raise ValueError(
-        "Recurring reminders need a time. Include 'at 9am' or provide "
-        "reminder_datetime as the anchor time. " + SUPPORTED_RECURRENCE_MESSAGE
-    )
-
-
-def _resolve_schedule_day(
-    weekday_text: str | None,
-    reminder_datetime: str | None,
-) -> str:
-    """Resolve a weekly weekday from explicit text or the anchor datetime."""
-    if weekday_text:
-        return _normalize_weekday_token(weekday_text)
-
-    if reminder_datetime:
-        anchor_time = _parse_reminder_datetime(reminder_datetime).astimezone(
-            get_app_timezone()
-        )
-        return anchor_time.strftime("%a").lower()
-
-    raise ValueError(
-        "Weekly recurring reminders need a day. Include 'on monday' or provide "
-        "reminder_datetime on the intended day. " + SUPPORTED_RECURRENCE_MESSAGE
-    )
-
-
-def _parse_local_time(time_text: str) -> datetime:
-    """Parse a wall-clock time in the app timezone."""
-    timezone = get_app_timezone()
-    parsed_time = dateparser.parse(
-        time_text,
-        settings={
-            "PREFER_DATES_FROM": "future",
-            "TIMEZONE": timezone.key,
-            "TO_TIMEZONE": timezone.key,
-            "RELATIVE_BASE": naive_local_now(),
-        },
-    )
-    if not parsed_time:
-        raise ValueError(f"Could not understand the recurring time: {time_text}")
-
-    if parsed_time.tzinfo is None:
-        return parsed_time.replace(tzinfo=timezone)
-    return parsed_time.astimezone(timezone)
-
-
-def _looks_like_cron_expression(value: str) -> bool:
-    """True when the input looks like a five-field cron expression."""
-    return len(value.split()) == 5
-
-
-def _normalize_weekday_token(weekday_text: str) -> str:
-    """Convert a weekday alias into a cron-compatible weekday token."""
-    normalized_weekday = WEEKDAY_TO_CRON.get(weekday_text.lower())
-    if normalized_weekday is None:
-        raise ValueError(f"Unsupported weekday: {weekday_text}")
-    return normalized_weekday
-
-
-def _format_clock_time(hour: int, minute: int) -> str:
-    """Render a local wall-clock time for user-facing reminder descriptions."""
-    return datetime(2000, 1, 1, hour, minute).strftime("%I:%M %p").lstrip("0")
 
 
 # ============================================================================

@@ -281,7 +281,7 @@ class TestScheduleReminder:
                 result = await schedule_reminder(
                     tool_context,  # type: ignore
                     message="Drink water",
-                    recurrence="daily at 9am",
+                    recurrence="0 9 * * *",
                 )
 
                 reminders = await scheduler.get_user_reminders("test_user")
@@ -290,24 +290,40 @@ class TestScheduleReminder:
                 assert "Recurring reminder scheduled" in result["message"]
                 assert len(reminders) == 1
                 assert reminders[0].is_recurring is True
-                assert reminders[0].recurrence_text == "daily at 9:00 AM"
+                assert reminders[0].recurrence_text == "cron: 0 9 * * *"
         finally:
             db_path.unlink(missing_ok=True)
 
     @pytest.mark.asyncio
-    async def test_recurring_schedule_without_time_returns_error(self) -> None:
-        """Test recurring reminders fail fast when required time details are missing."""
+    async def test_natural_language_recurrence_returns_error(self) -> None:
+        """Test recurring reminders reject non-cron recurrence text."""
         state = MockState({"user_id": "test_user"})
         tool_context = MockToolContext(state=state)
 
         result = await schedule_reminder(
             tool_context,  # type: ignore
             message="Drink water",
-            recurrence="daily",
+            recurrence="every minute",
         )
 
         assert result["status"] == "error"
-        assert "recurring reminders need a time" in result["message"].lower()
+        assert "cron expression" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_recurring_schedule_rejects_reminder_datetime(self) -> None:
+        """Test recurring reminders reject reminder_datetime plus recurrence."""
+        state = MockState({"user_id": "test_user"})
+        tool_context = MockToolContext(state=state)
+
+        result = await schedule_reminder(
+            tool_context,  # type: ignore
+            message="Drink water",
+            reminder_datetime="tomorrow at 9am",
+            recurrence="0 9 * * *",
+        )
+
+        assert result["status"] == "error"
+        assert "omit reminder_datetime" in result["message"].lower()
 
 
 class TestListReminders:
@@ -363,7 +379,7 @@ class TestListReminders:
                 await schedule_reminder(
                     tool_context,  # type: ignore
                     message="Stand up",
-                    recurrence="every 15 minutes",
+                    recurrence="*/15 * * * *",
                 )
 
                 result = await list_reminders(tool_context)  # type: ignore
@@ -372,7 +388,7 @@ class TestListReminders:
                 assert result["count"] == 1
                 assert result["reminders"][0]["is_recurring"] is True
                 assert result["reminders"][0]["schedule_type"] == "recurring"
-                assert result["reminders"][0]["recurrence"] == "every 15 minute(s)"
+                assert result["reminders"][0]["recurrence"] == "cron: */15 * * * *"
                 assert "next_trigger_time" in result["reminders"][0]
         finally:
             db_path.unlink(missing_ok=True)
