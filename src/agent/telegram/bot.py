@@ -286,6 +286,39 @@ def _strip_telegram_escapes(text: str) -> str:
     return re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", text)
 
 
+def _render_markdown_as_plain_text(text: str) -> str:
+    """Convert common markdown patterns into readable plain text.
+
+    This is used only when Telegram rejects MARKDOWN_V2 formatting.
+    The goal is not perfect markdown rendering. It is to remove the
+    most distracting formatting markers so the user still gets a clean,
+    readable answer.
+    """
+    plain_text = text
+
+    plain_text = re.sub(
+        r"```[^\n]*\n([\s\S]*?)```",
+        lambda match: match.group(1).strip(),
+        plain_text,
+    )
+    plain_text = re.sub(r"`([^`]+)`", r"\1", plain_text)
+    plain_text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", plain_text)
+    plain_text = re.sub(r"^#{1,6}\s*", "", plain_text, flags=re.MULTILINE)
+    plain_text = re.sub(r"(?<!\*)\*\*([^*]+)\*\*(?!\*)", r"\1", plain_text)
+    plain_text = re.sub(r"(?<!_)__([^_]+)__(?!_)", r"\1", plain_text)
+    plain_text = re.sub(r"~~([^~]+)~~", r"\1", plain_text)
+    plain_text = re.sub(r"(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)", r"\1", plain_text)
+    plain_text = re.sub(r"(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)", r"\1", plain_text)
+    plain_text = re.sub(r"\\text\s*\{([^{}]+)\}", r"\1", plain_text)
+    plain_text = plain_text.replace(r"\[", "[").replace(r"\]", "]")
+    plain_text = plain_text.replace(r"\(", "(").replace(r"\)", ")")
+    plain_text = plain_text.replace(r"\{", "{").replace(r"\}", "}")
+    plain_text = plain_text.replace(r"\%", "%")
+    plain_text = plain_text.replace(r"\-", "-")
+
+    return plain_text.strip()
+
+
 async def _send_validated_chunk(
     message: Message,
     chunk: str,
@@ -301,7 +334,10 @@ async def _send_validated_chunk(
         chunk: The text chunk to send.
         fallback_text: Plain-text version to send if formatting fails.
     """
-    plain_text = fallback_text or _strip_telegram_escapes(chunk)
+    if fallback_text is not None:
+        plain_text = _render_markdown_as_plain_text(fallback_text)
+    else:
+        plain_text = _strip_telegram_escapes(chunk)
 
     if validate_telegram_markup(chunk):
         try:

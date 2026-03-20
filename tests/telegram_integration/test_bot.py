@@ -8,6 +8,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from agent.telegram.bot import (
+    _render_markdown_as_plain_text,
     _send_long_message,
     _send_validated_chunk,
     _split_and_send,
@@ -355,7 +356,7 @@ class TestHandleMessage:
             second_call = mock_update.message.reply_text.call_args_list[1]
 
             assert first_call.kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
-            assert second_call.args[0] == r"\((1-\text{tax rate})\)"
+            assert second_call.args[0] == "((1-tax rate))"
             assert "parse_mode" not in second_call.kwargs
 
 
@@ -467,6 +468,26 @@ class TestSendValidatedChunk:
         assert first_call.kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
         assert second_call.args[0] == "value (test)"
         assert "parse_mode" not in second_call.kwargs
+
+
+class TestRenderMarkdownAsPlainText:
+    """Tests for markdown-to-plain-text fallback rendering."""
+
+    def test_strips_common_markdown_markers(self) -> None:
+        """Fallback text should stay readable without markdown noise."""
+        markdown = (
+            "### Bottom line\n\n"
+            "The **cost of debt** is `6%` and [details](https://example.com).\n"
+            r"\((1-\text{tax rate})\)"
+        )
+
+        result = _render_markdown_as_plain_text(markdown)
+
+        assert "Bottom line" in result
+        assert "**" not in result
+        assert "`" not in result
+        assert "details (https://example.com)" in result
+        assert "((1-tax rate))" in result
 
 
 class TestSplitAndSend:
