@@ -28,6 +28,8 @@ import re
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from telegram.helpers import escape_markdown
+
 
 class SegmentType(Enum):
     """Type of text segment."""
@@ -55,7 +57,7 @@ class Segment:
 
 # Characters that must be escaped in Telegram MARKDOWN_V2
 # (outside of code blocks and inline code)
-SPECIAL_CHARS = set("_*[]()~`>#+-=|{}.!")
+SPECIAL_CHARS = set("\\_*[]()~`>#+-=|{}.!")
 
 
 def _find_formatting_spans(text: str) -> list[Segment]:
@@ -202,13 +204,12 @@ def _escape_special_chars(text: str) -> str:
     Returns:
         Text with special characters escaped.
     """
-    result = []
-    for char in text:
-        if char in SPECIAL_CHARS:
-            result.append(f"\\{char}")
-        else:
-            result.append(char)
-    return "".join(result)
+    return escape_markdown(text, version=2)
+
+
+def _escape_link_url(url: str) -> str:
+    """Escape the URL portion of a Telegram MARKDOWN_V2 link."""
+    return escape_markdown(url, version=2, entity_type="text_link")
 
 
 def _segment_to_telegram(segment: Segment) -> str:
@@ -232,7 +233,8 @@ def _segment_to_telegram(segment: Segment) -> str:
         # Link format: [text](url) - escape special chars in text only
         if segment.link_text is not None and segment.link_url is not None:
             escaped_text = _escape_special_chars(segment.link_text)
-            return f"[{escaped_text}]({segment.link_url})"
+            escaped_url = _escape_link_url(segment.link_url)
+            return f"[{escaped_text}]({escaped_url})"
         return segment.text
 
     if segment.segment_type == SegmentType.BOLD:

@@ -17,6 +17,7 @@ Usage:
 import contextlib
 import logging
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -201,8 +202,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         # Split long messages if needed (Telegram has 4096 char limit)
         if len(telegram_response) <= MAX_MESSAGE_LENGTH:
-            await update.message.reply_text(
-                telegram_response, parse_mode=ParseMode.MARKDOWN_V2
+            await _send_validated_chunk(
+                message=update.message,
+                chunk=telegram_response,
+                fallback_text=response,
             )
         else:
             # Split into chunks at natural boundaries when possible
@@ -278,7 +281,16 @@ async def _send_long_message(message: Message, text: str) -> None:
             await _split_and_send(message, current_chunk)
 
 
-async def _send_validated_chunk(message: Message, chunk: str) -> None:
+def _strip_telegram_escapes(text: str) -> str:
+    """Convert Telegram-escaped markdown into readable plain text."""
+    return re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", text)
+
+
+async def _send_validated_chunk(
+    message: Message,
+    chunk: str,
+    fallback_text: str | None = None,
+) -> None:
     """Send a chunk after validating its markup.
 
     If the chunk has unbalanced markup entities, send without parse_mode
@@ -287,14 +299,24 @@ async def _send_validated_chunk(message: Message, chunk: str) -> None:
     Args:
         message: The Telegram message object to reply to.
         chunk: The text chunk to send.
+        fallback_text: Plain-text version to send if formatting fails.
     """
+    plain_text = fallback_text or _strip_telegram_escapes(chunk)
+
     if validate_telegram_markup(chunk):
-        await message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
+        try:
+            await message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
+            return
+        except TelegramError:
+            logger.warning(
+                "Telegram rejected markdown chunk, retrying without formatting",
+                exc_info=True,
+            )
+
     else:
-        # Markup is unbalanced - send without formatting to avoid errors
         logger.warning("Unbalanced markup detected, sending without formatting")
-        # Strip formatting by sending without parse_mode
-        await message.reply_text(chunk)
+
+    await message.reply_text(plain_text)
 
 
 async def _split_and_send(message: Message, text: str) -> None:

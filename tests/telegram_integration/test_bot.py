@@ -9,6 +9,7 @@ from telegram.error import TelegramError
 
 from agent.telegram.bot import (
     _send_long_message,
+    _send_validated_chunk,
     _split_and_send,
     create_application,
     handle_message,
@@ -333,6 +334,30 @@ class TestHandleMessage:
                 short_response, parse_mode=ParseMode.MARKDOWN_V2
             )
 
+    @pytest.mark.asyncio
+    async def test_retries_without_markdown_when_telegram_rejects_chunk(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """Telegram markdown failures should fall back to plain text."""
+        mock_update.message.reply_text = AsyncMock(
+            side_effect=[TelegramError("Can't parse entities"), None]
+        )
+
+        with patch(
+            "agent.telegram.bot.process_message",
+            new_callable=AsyncMock,
+            return_value=r"\((1-\text{tax rate})\)",
+        ):
+            await handle_message(mock_update, mock_context)
+
+            assert mock_update.message.reply_text.call_count == 2
+            first_call = mock_update.message.reply_text.call_args_list[0]
+            second_call = mock_update.message.reply_text.call_args_list[1]
+
+            assert first_call.kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
+            assert second_call.args[0] == r"\((1-\text{tax rate})\)"
+            assert "parse_mode" not in second_call.kwargs
+
 
 class TestSendLongMessage:
     """Tests for _send_long_message helper function."""
@@ -405,6 +430,43 @@ class TestSendLongMessage:
 
         # Should not send any message
         mock_message.reply_text.assert_not_called()
+
+
+class TestSendValidatedChunk:
+    """Tests for _send_validated_chunk helper."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_plain_text_for_unbalanced_markup(self) -> None:
+        """Unbalanced markdown should be sent without parse_mode."""
+        mock_message = MagicMock()
+        mock_message.reply_text = AsyncMock()
+
+        await _send_validated_chunk(mock_message, "*unclosed")
+
+        mock_message.reply_text.assert_called_once_with("*unclosed")
+
+    @pytest.mark.asyncio
+    async def test_retries_plain_text_when_telegram_rejects_markup(self) -> None:
+        """Telegram entity parse failures should retry without markdown."""
+        mock_message = MagicMock()
+        mock_message.reply_text = AsyncMock(
+            side_effect=[TelegramError("Can't parse entities"), None]
+        )
+
+        await _send_validated_chunk(
+            mock_message,
+            chunk="value \\(test\\)",
+            fallback_text="value (test)",
+        )
+
+        assert mock_message.reply_text.call_count == 2
+        first_call = mock_message.reply_text.call_args_list[0]
+        second_call = mock_message.reply_text.call_args_list[1]
+
+        assert first_call.args[0] == "value \\(test\\)"
+        assert first_call.kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
+        assert second_call.args[0] == "value (test)"
+        assert "parse_mode" not in second_call.kwargs
 
 
 class TestSplitAndSend:
