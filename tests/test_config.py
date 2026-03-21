@@ -1,5 +1,6 @@
 """Comprehensive unit tests for config module."""
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 
 from agent.utils.config import (
     ServerEnv,
+    get_data_dir,
     initialize_environment,
 )
 
@@ -422,3 +424,58 @@ class TestEdgeCases:
         env = ServerEnv.model_validate(data)
         assert env.port == 9000
         assert isinstance(env.port, int)
+
+
+class TestGetDataDir:
+    """SQLite / agent data path must follow AGENT_DIR in Docker, not site-packages."""
+
+    def test_agent_dir_yields_agent_data_subdir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When AGENT_DIR is set, data dir is AGENT_DIR/agent/data."""
+        monkeypatch.delenv("AGENT_DATA_DIR", raising=False)
+        app_src = tmp_path / "app_src"
+        monkeypatch.setenv("AGENT_DIR", str(app_src))
+
+        resolved = get_data_dir()
+
+        assert resolved == (app_src / "agent" / "data").resolve()
+        assert resolved.is_dir()
+
+    def test_agent_data_dir_overrides_agent_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AGENT_DATA_DIR takes precedence over AGENT_DIR."""
+        custom = tmp_path / "custom_data"
+        monkeypatch.setenv("AGENT_DATA_DIR", str(custom))
+        monkeypatch.setenv("AGENT_DIR", str(tmp_path / "ignored_src"))
+
+        resolved = get_data_dir()
+
+        assert resolved == custom.resolve()
+
+    def test_whitespace_only_agent_data_dir_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Blank AGENT_DATA_DIR falls through to AGENT_DIR."""
+        monkeypatch.setenv("AGENT_DATA_DIR", "   ")
+        app_src = tmp_path / "app_src"
+        monkeypatch.setenv("AGENT_DIR", str(app_src))
+
+        resolved = get_data_dir()
+
+        assert resolved == (app_src / "agent" / "data").resolve()
+
+    def test_default_data_dir_is_used_as_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When no env vars are set, DEFAULT_DATA_DIR is used."""
+        monkeypatch.delenv("AGENT_DATA_DIR", raising=False)
+        monkeypatch.delenv("AGENT_DIR", raising=False)
+        mock_default_dir = tmp_path / "default_data"
+        monkeypatch.setattr("agent.utils.config.DEFAULT_DATA_DIR", mock_default_dir)
+
+        resolved = get_data_dir()
+
+        assert resolved == mock_default_dir.resolve()
+        assert resolved.is_dir()

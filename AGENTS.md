@@ -100,7 +100,7 @@ The Telegram bot uses the same session storage as the server. When `DATABASE_URL
 
 ### Data Persistence (Reminders & Fitness)
 
-Reminders and fitness data (calories, workouts) are stored in local SQLite files under the agent data directory (`src/agent/data/`). In Docker, this directory is mounted as a **named volume** (`agent_data`), which means data survives CI/CD redeployments automatically.
+Reminders and fitness data (calories, workouts) are stored in local SQLite files under the agent data directory (`src/agent/data/`). In Docker, this directory is mounted as a **named volume** (`agent_data`), which means data survives CI/CD redeployments automatically. Compose pins the **project name** (`adk-agent` in `compose.yaml`) so volume names do not change when the repo lives in a differently named folder or CI checks out to another path (which would otherwise attach a new empty volume).
 
 | Command | Effect on data |
 | :--- | :--- |

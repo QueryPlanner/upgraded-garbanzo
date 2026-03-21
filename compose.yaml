@@ -4,6 +4,11 @@
 # Reminders and fitness data (calories, workouts) are stored in
 # SQLite files inside the `agent_data` named volume.
 #
+# The top-level `name` pins the Compose *project name* so volume names
+# stay the same (e.g. adk-agent_agent_data) even if this repo lives in a
+# differently named folder or CI checks out to another path. Without this,
+# each path change creates new empty volumes and SQLite looks "wiped."
+#
 # Named volumes SURVIVE redeployment:
 #   docker compose up -d   ← safe: volumes are preserved
 #   docker compose down    ← safe: volumes are preserved
@@ -13,6 +18,8 @@
 #                             ADK artifacts, context). Use only when you
 #                             intentionally want to wipe all agent data.
 # ============================================================
+
+name: adk-agent
 
 services:
   telegram-bot:

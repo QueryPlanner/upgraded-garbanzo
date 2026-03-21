@@ -92,6 +92,8 @@ jobs:
         run: |
           cat <<EOF > .env
           AGENT_NAME=telegram-agent
+          COMPOSE_PROJECT_NAME=adk-agent
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY@L}:main
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
@@ -107,6 +109,6 @@ jobs:
       - name: Pull and Deploy
         run: |
           export IMAGE="ghcr.io/${GITHUB_REPOSITORY@L}:main"
-          docker compose pull
-          docker compose up -d
+          docker compose -f compose.image.yaml pull
+          docker compose -f compose.image.yaml up -d
           docker image prune -f

@@ -1,0 +1,31 @@
+# Pull-only Compose file for servers that have no git clone (no Dockerfile).
+# Keep service definition in sync with compose.yaml (volumes, env, command).
+#
+# Usage:
+#   export IMAGE=ghcr.io/<owner>/<repo>:main
+#   docker compose -f compose.image.yaml pull
+#   docker compose -f compose.image.yaml up -d
+#
+# Or set IMAGE in .env next to this file.
+
+name: adk-agent
+
+services:
+  telegram-bot:
+    image: ${IMAGE:?set IMAGE e.g. ghcr.io/owner/repo:main}
+    environment:
+      - AGENT_NAME=telegram-agent
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    volumes:
+      - agent_artifacts:/app/src/.adk
+      - agent_data:/app/src/agent/data
+      - agent_context:/app/src/.context
+    restart: always
+    command: python -m agent.telegram.bot
+
+volumes:
+  agent_artifacts:
+  agent_data:
+  agent_context:
