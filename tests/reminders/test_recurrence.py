@@ -1,10 +1,10 @@
 """Tests for recurring reminder schedule helpers."""
 
-from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfoNotFoundError
 
 import pytest
-from apscheduler.triggers.cron import CronTrigger  # type: ignore
 
 from agent.reminders.recurrence import (
     RecurringSchedule,
@@ -38,7 +38,7 @@ class TestValidateCronExpression:
 
     def test_raises_for_invalid_timezone(self) -> None:
         """Test that invalid timezone raises exception."""
-        with pytest.raises(Exception):  # ZoneInfo throws ZoneInfoNotFoundError
+        with pytest.raises(ZoneInfoNotFoundError):
             validate_cron_expression("*/15 * * * *", "Invalid/Timezone")
 
 
@@ -119,5 +119,5 @@ class TestRecurringSchedule:
             description="every 15 minutes",
             timezone_name="UTC",
         )
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             schedule.cron_expression = "0 * * * *"  # type: ignore

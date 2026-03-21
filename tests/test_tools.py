@@ -4,14 +4,15 @@ import logging
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
 # Import mock classes from conftest
 from conftest import MockState, MockToolContext
 
-from agent.reminders import ReminderScheduler, ReminderStorage
+from agent.reminders import Reminder, ReminderScheduler, ReminderStorage
 from agent.tools import (
     _parse_reminder_datetime,
     cancel_reminder,
@@ -339,3 +340,160 @@ class TestCancelReminder:
                 assert result["status"] == "error"
         finally:
             db_path.unlink(missing_ok=True)
+
+
+class TestScheduleReminderBranches:
+    """Extra branches for schedule_reminder."""
+
+    @pytest.mark.asyncio
+    async def test_user_id_from_tool_context_attribute(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = Path(f.name)
+        try:
+            storage = ReminderStorage(db_path=db_path)
+            scheduler = ReminderScheduler()
+            scheduler.storage = storage
+            tool_context = MockToolContext(state=MockState({}), user_id="attr-user")
+            with patch("agent.tools.get_scheduler", return_value=scheduler):
+                result = await schedule_reminder(
+                    tool_context,  # type: ignore
+                    message="Hi",
+                    reminder_datetime="in 2 hours",
+                )
+            assert result["status"] == "success"
+        finally:
+            db_path.unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_success_truncates_long_message_in_reply(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = Path(f.name)
+        try:
+            storage = ReminderStorage(db_path=db_path)
+            scheduler = ReminderScheduler()
+            scheduler.storage = storage
+            long_msg = "M" * 80
+            with patch("agent.tools.get_scheduler", return_value=scheduler):
+                result = await schedule_reminder(
+                    MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+                    message=long_msg,
+                    reminder_datetime="in 2 hours",
+                )
+            assert result["status"] == "success"
+            assert "..." in result["message"]
+        finally:
+            db_path.unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_scheduler_failure_returns_error(self) -> None:
+        scheduler = MagicMock()
+        scheduler.storage = AsyncMock()
+        scheduler.storage.initialize = AsyncMock()
+        scheduler.schedule_reminder = AsyncMock(side_effect=RuntimeError("db"))
+
+        with patch("agent.tools.get_scheduler", return_value=scheduler):
+            result = await schedule_reminder(
+                MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+                message="x",
+                reminder_datetime="in 3 hours",
+            )
+        assert result["status"] == "error"
+        assert "Failed to schedule" in result["message"]
+
+
+class TestListRemindersBranches:
+    @pytest.mark.asyncio
+    async def test_lists_formatted_reminders(self) -> None:
+        scheduler = MagicMock()
+        past = Reminder(
+            id=1,
+            user_id="u",
+            message="do thing",
+            trigger_time="2026-03-15T10:00:00+00:00",
+            is_sent=False,
+            created_at="2026-03-15T09:00:00",
+        )
+        scheduler.get_user_reminders = AsyncMock(return_value=[past])
+
+        with patch("agent.tools.get_scheduler", return_value=scheduler):
+            result = await list_reminders(
+                MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+            )
+        assert result["status"] == "success"
+        assert result["count"] == 1
+        assert result["reminders"][0]["message"] == "do thing"
+
+    @pytest.mark.asyncio
+    async def test_storage_error_message(self) -> None:
+        scheduler = MagicMock()
+        scheduler.get_user_reminders = AsyncMock(side_effect=ValueError("bad"))
+
+        with patch("agent.tools.get_scheduler", return_value=scheduler):
+            result = await list_reminders(
+                MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+            )
+        assert result["status"] == "error"
+        assert "Failed to list reminders" in result["message"]
+
+
+class TestCancelReminderBranches:
+    @pytest.mark.asyncio
+    async def test_success_when_deleted(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = Path(f.name)
+        try:
+            storage = ReminderStorage(db_path=db_path)
+            scheduler = ReminderScheduler()
+            scheduler.storage = storage
+            await storage.initialize()
+            rid = await storage.add_reminder(
+                Reminder(
+                    user_id="u",
+                    message="m",
+                    trigger_time="2026-04-01T12:00:00",
+                    created_at="2026-04-01T10:00:00",
+                )
+            )
+            with patch("agent.tools.get_scheduler", return_value=scheduler):
+                result = await cancel_reminder(
+                    MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+                    reminder_id=rid,
+                )
+            assert result["status"] == "success"
+        finally:
+            await storage.close()
+            db_path.unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_delete_failure_message(self) -> None:
+        scheduler = MagicMock()
+        scheduler.delete_reminder = AsyncMock(return_value=False)
+
+        with patch("agent.tools.get_scheduler", return_value=scheduler):
+            result = await cancel_reminder(
+                MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+                reminder_id=99,
+            )
+        assert result["status"] == "error"
+        assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_exception_during_cancel(self) -> None:
+        scheduler = MagicMock()
+        scheduler.delete_reminder = AsyncMock(side_effect=RuntimeError("x"))
+
+        with patch("agent.tools.get_scheduler", return_value=scheduler):
+            result = await cancel_reminder(
+                MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
+                reminder_id=1,
+            )
+        assert result["status"] == "error"
+
+
+class TestParseReminderDatetimeBranches:
+    def test_timezone_aware_parse_uses_astimezone_branch(self) -> None:
+        ist = ZoneInfo("Asia/Kolkata")
+        aware = datetime(2026, 6, 1, 12, 0, tzinfo=ist)
+        with patch("agent.tools.dateparser.parse", return_value=aware):
+            out = _parse_reminder_datetime("ignored input")
+        assert out.tzinfo == UTC

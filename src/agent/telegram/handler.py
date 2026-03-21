@@ -32,6 +32,10 @@ def _telegram_latency_log_enabled() -> bool:
     return value in ("1", "true", "yes")
 
 
+# Suffix for ADK session IDs used when delivering scheduled reminders so they do not
+# overwrite the user's main chat session.
+REMINDER_SESSION_SUFFIX = "-reminder"
+
 # Template for injecting reminders into the agent's context
 REMINDER_PROMPT_TEMPLATE = """[SCHEDULED REMINDER]
 
@@ -345,11 +349,17 @@ class TelegramHandler:
             f"Processing reminder for user {user_id}: '{reminder_message[:30]}...'"
         )
 
+        effective_session_id = (
+            session_id
+            if session_id is not None
+            else f"{user_id}{REMINDER_SESSION_SUFFIX}"
+        )
+
         # Process through the agent using the existing message flow
         response = await self.process_message(
             user_id=user_id,
             message=prompt,
-            session_id=session_id,
+            session_id=effective_session_id,
         )
 
         return response

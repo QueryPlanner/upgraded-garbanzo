@@ -1,9 +1,11 @@
 """Tests for the markdown to Telegram MARKDOWN_V2 converter."""
 
 from agent.telegram.markdown_converter import (
+    Segment,
     SegmentType,
     _escape_special_chars,
     _find_formatting_spans,
+    _segment_to_telegram,
     convert_markdown_to_telegram,
     validate_telegram_markup,
 )
@@ -117,6 +119,14 @@ def hello():
         result = convert_markdown_to_telegram("***important***")
         # At minimum, special chars should be handled
         assert result  # Should return something
+
+
+class TestSegmentToTelegram:
+    """Direct coverage for ``_segment_to_telegram`` branches."""
+
+    def test_link_without_url_or_text_returns_segment_text(self) -> None:
+        seg = Segment("[not a real link segment]", SegmentType.LINK)
+        assert _segment_to_telegram(seg) == "[not a real link segment]"
 
 
 class TestFindFormattingSpans:

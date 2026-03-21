@@ -12,7 +12,9 @@ from agent.utils.observability import configure_otel_resource, setup_logging
 class TestConfigureOtelResource:
     """Tests for configure_otel_resource function."""
 
-    def test_sets_otel_resource_attributes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_sets_otel_resource_attributes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that OTEL_RESOURCE_ATTRIBUTES is set."""
         monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
         configure_otel_resource("test-agent")

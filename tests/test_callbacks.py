@@ -314,3 +314,33 @@ class TestNotifyToolCall:
             tool_name="get_stats",
             args={"count": 10},
         )
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_logs_user_content_at_debug(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When user_content is present, DEBUG logs include serialized content."""
+        from conftest import MockContent
+
+        caplog.set_level(logging.DEBUG)
+        mock_tool = make_mock_tool(name="tool_with_content")
+        mock_state = MockState({"user_id": "123456"})
+        mock_context = MockToolContext(
+            state=mock_state,
+            user_content=MockContent({"role": "user", "text": "hello"}),
+        )
+
+        mock_service = MagicMock()
+        mock_service.notify_tool_call = AsyncMock()
+
+        with patch(
+            "agent.telegram.notifications.get_notification_service",
+            return_value=mock_service,
+        ):
+            await notify_tool_call(
+                tool=mock_tool,
+                args={"k": "v"},
+                tool_context=as_tool_context(mock_context),
+            )
+
+        assert "User Content:" in caplog.text
