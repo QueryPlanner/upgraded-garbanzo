@@ -190,7 +190,47 @@ This repo pins the project name (`name: adk-agent` in `compose.yaml`, and `COMPO
 
 If you already have data in an older volume (from a previous folder name), list volumes with `docker volume ls`, identify the old `*_agent_data` volume, and copy its files into the new volume or bind mount once.
 
+### “Data is gone” but logs show `/app/src/agent/data/*.db`
+
+That path means SQLite is on the **mounted** volume. Empty reminders/workouts usually mean this Compose project is using a **new** named volume (for example `adk-agent_agent_data`) while your history lives in an **older** one (for example `upgraded-garbanzo_agent_data`). List volumes:
+
+```bash
+docker volume ls | grep agent_data
+```
+
+Copy `*.db` from the old volume into the new one once (adjust volume names to match `docker volume ls`):
+
+```bash
+OLD=upgraded-garbanzo_agent_data
+NEW=adk-agent_agent_data
+docker run --rm -v "$OLD":/from:ro -v "$NEW":/to alpine \
+  sh -c 'cp -v /from/*.db /to/ 2>/dev/null || true; ls -la /to'
+```
+
+Stop the bot container before copying if you want to avoid SQLite write contention (`docker stop adk-agent-telegram-bot-1`), then start it again.
+
 ## Troubleshooting
+
+### Telegram: `Conflict: terminated by other getUpdates request`
+
+Only **one** process may long-poll `getUpdates` per bot token. **Alternating `HTTP/1.1 200 OK` and `409 Conflict`** on `getUpdates` almost always means **two pollers** are still active (two containers, or this host **and** another machine, or the **GitHub Actions self-hosted runner** and your VM both running the same bot).
+
+On **every** host that might run this stack:
+
+```bash
+docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | grep -iE 'telegram|garbanzo|adk-agent'
+```
+
+Stop extras until exactly **one** container for this bot is running. If you use a self-hosted runner that deploys Compose, ensure it is not leaving a second copy on another machine or user account.
+
+Stop and remove a duplicate on **this** host (example names):
+
+```bash
+docker stop upgraded-garbanzo-telegram-bot-1
+docker rm upgraded-garbanzo-telegram-bot-1
+```
+
+`docker compose down` must be run from the directory that contains **that** stack’s `compose.yaml`; it does not accept a container ID.
 
 ### Permission Errors with Artifacts
 If you encounter `PermissionError: [Errno 13] Permission denied: '/app/src/.adk'` when running with Docker:
