@@ -14,8 +14,11 @@ from conftest import MockState, MockToolContext
 
 from agent.reminders import Reminder, ReminderScheduler, ReminderStorage
 from agent.tools import (
+    _agent_runs_inside_docker,
     _parse_reminder_datetime,
+    _truncate_output,
     cancel_reminder,
+    docker_bash_execute,
     example_tool,
     get_current_datetime,
     list_reminders,
@@ -688,3 +691,149 @@ class TestParseReminderDatetimeTimezone:
         assert result.tzinfo is not None
         # Result is converted to UTC
         assert str(result.tzinfo) == "UTC"
+
+
+class TestDockerBashExecute:
+    """Tests for docker_bash_execute (Docker-gated shell tool)."""
+
+    def test_agent_runs_inside_docker_is_deterministic_bool(self) -> None:
+        """Exercise /.dockerenv check (real filesystem; no patch)."""
+        assert _agent_runs_inside_docker() in (True, False)
+
+    def test_truncate_output_marks_truncation(self) -> None:
+        data = b"x" * 100
+        text, truncated = _truncate_output(data, max_bytes=50)
+        assert truncated is True
+        assert "truncated" in text
+
+    @pytest.mark.asyncio
+    async def test_disabled_when_not_in_docker(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=False):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo hi",
+            )
+        assert result["status"] == "error"
+        assert "outside Docker" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_command(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "   ",
+            )
+        assert result["status"] == "error"
+        assert "non-empty" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_command(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "x" * 13_000,
+            )
+        assert result["status"] == "error"
+        assert "maximum length" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_runs_echo(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo hello",
+            )
+        assert result["status"] == "success"
+        assert result["exit_code"] == 0
+        assert "hello" in result["stdout"]
+        assert result["output_truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_large_stdout_truncated(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "python3 -c \"print('x' * 200000)\"",
+            )
+        assert result["status"] == "success"
+        assert result["output_truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_timeout_seconds_clamped_low(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo ok",
+                timeout_seconds=0,
+            )
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_timeout_seconds_clamped_high(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo ok",
+                timeout_seconds=9_999,
+            )
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_subprocess_start_oserror(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with (
+            patch("agent.tools._agent_runs_inside_docker", return_value=True),
+            patch(
+                "agent.tools.asyncio.create_subprocess_exec",
+                side_effect=OSError("no bash"),
+            ),
+        ):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo hi",
+            )
+        assert result["status"] == "error"
+        assert "Failed to start bash" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_times_out(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "sleep 5",
+                timeout_seconds=1,
+            )
+        assert result["status"] == "error"
+        assert result.get("timed_out") is True
+        assert "timeout" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_nonzero_exit_still_returns_output(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo out >&1; echo err >&2; exit 7",
+            )
+        assert result["status"] == "success"
+        assert result["exit_code"] == 7
+        assert "out" in result["stdout"]
+        assert "err" in result["stderr"]

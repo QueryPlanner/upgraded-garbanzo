@@ -36,6 +36,7 @@ from .tools import (  # noqa: E402
     cancel_reminder,
     delete_context_file,
     delete_fitness_entry,
+    docker_bash_execute,
     example_tool,
     get_calorie_stats,
     get_current_datetime,
@@ -135,6 +136,8 @@ root_agent = LlmAgent(
         list_context_files,
         # YouTube transcript tool
         get_youtube_transcript,
+        # Docker-only shell (see docker_bash_execute docstring)
+        docker_bash_execute,
         # Skills (lazy-loaded toolsets)
         skill_toolset,
     ],
