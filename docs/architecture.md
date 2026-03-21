@@ -73,20 +73,20 @@ The reminder system allows users to schedule reminders through natural language 
 1. **Storage Layer** (`reminders/storage.py`)
    - When `DATABASE_URL` is a Postgres URL, reminders live in table `agent_reminders` in the same database as ADK sessions
    - Otherwise SQLite under the agent data directory (default `src/agent/data/reminders.db`)
-   - Stores: user_id, message, trigger_time, is_sent status
+   - Stores: user_id, message, next trigger time, sent status, and optional recurring schedule metadata
 
 2. **Scheduler** (`reminders/scheduler.py`)
    - Uses APScheduler for periodic reminder checks (every 30 seconds)
    - Sends due reminders via Telegram push notifications
-   - Manages the reminder lifecycle
+   - Marks one-time reminders sent and reschedules recurring reminders to their next fire time
 
 3. **Agent Tools** (`tools.py`)
    - `get_current_datetime`: Server clock in the app timezone (default IST) to the second
-   - `schedule_reminder`: Create reminders; relative phrases use `Asia/Kolkata` and `RELATIVE_BASE`
-   - `list_reminders`: View scheduled reminders (times shown in app timezone)
+   - `schedule_reminder`: Create one-time or recurring reminders; relative phrases use `Asia/Kolkata` and `RELATIVE_BASE`
+   - `list_reminders`: View scheduled reminders with one-time vs recurring metadata (times shown in app timezone)
    - `cancel_reminder`: Delete pending reminders
 
-Reminder `trigger_time` values are stored in UTC ISO for ordering; user-facing strings use `AGENT_TIMEZONE` (default `Asia/Kolkata`).
+Reminder `trigger_time` values are stored in UTC ISO for ordering; recurring reminders also persist a cron-style rule plus timezone so the next occurrence can be recovered after restart. User-facing strings use `AGENT_TIMEZONE` (default `Asia/Kolkata`).
 
 #### Flow
 
@@ -103,3 +103,5 @@ The reminder system supports natural language time formats:
 - Absolute: `”2026-03-15 14:30”`, `”2026-03-15 at 3pm”`
 - Relative: `”in 30 minutes”`, `”in 2 hours”`
 - Day-based: `”tomorrow at 9am”`, `”at 5pm today”`
+- Recurring: `”daily at 9am”`, `”every Monday at 8:30”`, `”every 15 minutes”`
+- Cron-style recurring: `”*/15 * * * *”`, `”30 8 * * mon”`

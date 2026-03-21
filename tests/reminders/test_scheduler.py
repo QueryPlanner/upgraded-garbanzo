@@ -258,3 +258,42 @@ class TestAgentAwareReminders:
 
         # Should return early without error
         await scheduler._send_reminder(reminder)
+
+    @pytest.mark.asyncio
+    async def test_send_recurring_reminder_reschedules_next_occurrence(
+        self, isolated_storage: ReminderStorage
+    ) -> None:
+        """Test recurring reminders stay active and move to the next fire time."""
+        scheduler = ReminderScheduler()
+        scheduler.storage = isolated_storage
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock()
+        scheduler.set_bot(mock_bot)
+
+        original_trigger_time = datetime.now(UTC) - timedelta(minutes=1)
+        reminder_id = await isolated_storage.add_reminder(
+            Reminder(
+                user_id="test_user",
+                message="Stand up",
+                trigger_time=original_trigger_time.isoformat(),
+                recurrence_rule="*/15 * * * *",
+                recurrence_text="every 15 minute(s)",
+                timezone_name="Asia/Kolkata",
+                created_at=datetime.now(UTC).isoformat(),
+            )
+        )
+
+        due_reminders = await isolated_storage.get_due_reminders()
+        assert len(due_reminders) == 1
+
+        await scheduler._send_reminder(due_reminders[0])
+
+        reminders = await isolated_storage.get_user_reminders("test_user")
+
+        assert len(reminders) == 1
+        assert reminders[0].id == reminder_id
+        assert reminders[0].is_recurring is True
+        assert reminders[0].is_sent is False
+        assert reminders[0].trigger_time != original_trigger_time.isoformat()
+        assert datetime.fromisoformat(reminders[0].trigger_time) > original_trigger_time

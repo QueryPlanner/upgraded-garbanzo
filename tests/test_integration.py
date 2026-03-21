@@ -8,6 +8,7 @@ Future: Container-based smoke tests for CI/CD will be added here.
 """
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 from agent import app
@@ -18,7 +19,7 @@ class AgentConfigLike(Protocol):
 
     name: str
     model: Any
-    instruction: str | None
+    instruction: str | Any | None
     description: str | None
     tools: Sequence[object] | None
 
@@ -99,6 +100,32 @@ class TestAgentIntegration:
         if typed_agent.description is not None:
             assert isinstance(typed_agent.description, str)
             assert len(typed_agent.description) > 0
+
+    def test_agent_instruction_provider_reloads_context_files(
+        self, monkeypatch: Any, tmp_path: Path
+    ) -> None:
+        """Verify context-backed instructions are rebuilt from disk each call."""
+        context_dir = tmp_path / ".context"
+        context_dir.mkdir()
+        for filename in ("BOOTSTRAP.md", "IDENTITY.md", "SOUL.md"):
+            (context_dir / filename).write_text("", encoding="utf-8")
+
+        user_file = context_dir / "USER.md"
+        user_file.write_text("first preference", encoding="utf-8")
+
+        import agent.prompt as prompt_module
+
+        monkeypatch.setattr(prompt_module, "DEFAULT_CONTEXT_DIR", context_dir)
+
+        instruction_provider = as_agent_config(app.root_agent).instruction
+        assert callable(instruction_provider)
+
+        first_instruction = instruction_provider()
+        user_file.write_text("updated preference", encoding="utf-8")
+        second_instruction = instruction_provider()
+
+        assert "first preference" in first_instruction
+        assert "updated preference" in second_instruction
 
     def test_agent_tools_are_valid_if_configured(self) -> None:
         """Verify agent tools (if any) are properly initialized."""

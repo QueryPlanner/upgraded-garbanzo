@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from apscheduler.triggers.cron import CronTrigger  # type: ignore
 from google.adk.apps import App
 
 from agent.fitness import (
@@ -19,7 +20,11 @@ from agent.fitness import (
     WorkoutEntry,
 )
 from agent.reminders.recurrence import get_next_trigger_time
-from agent.reminders.scheduler import ReminderScheduler, get_scheduler
+from agent.reminders.scheduler import (
+    ReminderScheduler,
+    _parse_stored_trigger_time,
+    get_scheduler,
+)
 from agent.reminders.storage import (
     Reminder,
     ReminderStorage,
@@ -62,8 +67,6 @@ class TestSessionFactoryInMemoryPaths:
 
 class TestRecurrenceEdge:
     def test_get_next_trigger_time_raises_when_no_fire(self) -> None:
-        from apscheduler.triggers.cron import CronTrigger  # type: ignore
-
         real = CronTrigger.from_crontab("0 * * * *", timezone=ZoneInfo("UTC"))
         fake = MagicMock()
         fake.get_next_fire_time.return_value = None
@@ -72,9 +75,50 @@ class TestRecurrenceEdge:
                 "agent.reminders.recurrence.CronTrigger.from_crontab",
                 side_effect=[real, fake],
             ),
-            pytest.raises(ValueError, match="No upcoming fire time"),
+            pytest.raises(ValueError, match="no future fire time"),
         ):
             get_next_trigger_time("0 * * * *", "UTC")
+
+    def test_get_next_trigger_time_fills_tz_when_next_fire_naive(self) -> None:
+        """Cover branch when APScheduler returns a naive next fire datetime."""
+        real = CronTrigger.from_crontab("0 * * * *", timezone=ZoneInfo("UTC"))
+        mock_trigger = MagicMock()
+        mock_trigger.get_next_fire_time.return_value = datetime(2026, 6, 1, 12, 0, 0)
+        with patch(
+            "agent.reminders.recurrence.CronTrigger.from_crontab",
+            side_effect=[real, mock_trigger],
+        ):
+            out = get_next_trigger_time(
+                "0 * * * *",
+                "UTC",
+                reference_time=datetime(2026, 6, 1, 11, 0, 0, tzinfo=UTC),
+            )
+        assert out.tzinfo == UTC
+
+
+class TestSchedulerPrivateHelpers:
+    def test_parse_stored_trigger_time_assumes_utc_when_naive_iso(self) -> None:
+        parsed = _parse_stored_trigger_time("2026-01-01T12:00:00")
+        assert parsed.tzinfo == UTC
+        assert parsed.hour == 12
+
+    def test_parse_stored_trigger_time_normalizes_offset_to_utc(self) -> None:
+        parsed = _parse_stored_trigger_time("2026-01-01T12:00:00+05:30")
+        assert parsed.tzinfo == UTC
+
+    @pytest.mark.asyncio
+    async def test_complete_reminder_delivery_requires_id(self) -> None:
+        scheduler = ReminderScheduler()
+        reminder = Reminder(
+            id=None,
+            user_id="u",
+            message="m",
+            trigger_time="2026-01-01T12:00:00+00:00",
+            is_sent=False,
+            created_at="2026-01-01T10:00:00",
+        )
+        with pytest.raises(ValueError, match="must have an ID"):
+            await scheduler._complete_reminder_delivery(reminder)
 
 
 class TestSessionFactoryPostgres:

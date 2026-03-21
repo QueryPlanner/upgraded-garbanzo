@@ -1,4 +1,4 @@
-"""Helpers for validating cron expressions and computing next fire times."""
+"""Helpers for recurring reminder schedules and cron validation."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -6,6 +6,8 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger  # type: ignore
+
+from ..utils.app_timezone import now_utc
 
 
 @dataclass(frozen=True)
@@ -18,33 +20,47 @@ class RecurringSchedule:
 
 
 def validate_cron_expression(cron_expression: str, timezone_name: str) -> str:
-    """Normalize whitespace, validate tz and 5-field cron; return canonical expr."""
-    normalized = " ".join(cron_expression.split())
-    tz = ZoneInfo(timezone_name)
-    CronTrigger.from_crontab(normalized, timezone=tz)
-    return normalized
+    """Validate a five-field cron expression and return the normalized text."""
+    normalized_expression = " ".join(cron_expression.split())
+    CronTrigger.from_crontab(
+        normalized_expression,
+        timezone=ZoneInfo(timezone_name),
+    )
+    return normalized_expression
 
 
 def get_next_trigger_time(
     cron_expression: str,
     timezone_name: str,
-    reference: datetime | None = None,
+    reference_time: datetime | None = None,
 ) -> datetime:
-    """Return the next cron fire time strictly after ``reference``, in UTC."""
-    normalized = validate_cron_expression(cron_expression, timezone_name)
-    tz = ZoneInfo(timezone_name)
-    trigger = CronTrigger.from_crontab(normalized, timezone=tz)
+    """Return the next UTC fire time strictly after the reference instant."""
+    normalized_expression = validate_cron_expression(cron_expression, timezone_name)
+    utc_reference_time = reference_time or now_utc()
+    if utc_reference_time.tzinfo is None:
+        utc_reference_time = utc_reference_time.replace(tzinfo=UTC)
 
-    if reference is None:
-        now_for_scheduler = datetime.now(UTC)
-    elif reference.tzinfo is None:
-        now_for_scheduler = reference.replace(tzinfo=UTC)
-    else:
-        now_for_scheduler = reference
+    timezone = ZoneInfo(timezone_name)
+    local_reference_time = utc_reference_time.astimezone(timezone)
 
-    next_fire = trigger.get_next_fire_time(None, now_for_scheduler)
-    if next_fire is None:
-        msg = f"No upcoming fire time for cron {normalized!r} in {timezone_name!r}"
-        raise ValueError(msg)
+    trigger = CronTrigger.from_crontab(
+        normalized_expression,
+        timezone=timezone,
+    )
+    next_fire_time = cast(
+        datetime | None,
+        trigger.get_next_fire_time(
+            previous_fire_time=None,
+            now=local_reference_time,
+        ),
+    )
 
-    return cast(datetime, next_fire.astimezone(UTC))
+    if next_fire_time is None:
+        raise ValueError(
+            f"Recurring schedule has no future fire time: {normalized_expression}"
+        )
+
+    if next_fire_time.tzinfo is None:
+        next_fire_time = next_fire_time.replace(tzinfo=timezone)
+
+    return next_fire_time.astimezone(UTC)

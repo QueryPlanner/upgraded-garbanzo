@@ -74,7 +74,10 @@ def return_description_root() -> str:
     return description
 
 
-def return_instruction_root() -> str:
+def return_instruction_root(ctx: ReadonlyContext | None = None) -> str:
+    """Return the root instruction, reloading context files on each call."""
+    _ = ctx
+
     # Load context files (identity, soul, user preferences)
     context = load_context()
 
@@ -85,6 +88,14 @@ def return_instruction_root() -> str:
   AGENT_TIMEZONE if needed.
 - Before a relative reminder (e.g. "in 10 minutes"), call get_current_datetime
   first, then schedule_reminder with a relative phrase or the ISO time.
+- For recurring reminders, convert the user's requested cadence into a 5-field
+  cron expression in the app timezone before calling schedule_reminder.
+- The schedule_reminder message is stored and passed back to you when the
+  reminder fires. Write it as a self-contained future instruction describing
+  what the user should receive at delivery time.
+- When a scheduled reminder is firing, it is a delivery event, not a new
+  scheduling request. Do not call schedule_reminder again, do not validate the
+  scheduled time, and do not mention that the scheduled time is in the past.
   Always use time tool to get the current time and date if user asks for it.
   This prompt gives the current time and date only when user starts
   the conversation.
@@ -106,8 +117,10 @@ all experience levels.
 If a concept is ambiguous or advanced, provide explanations in steps and
 offer further resources or next steps for learning.
 
-Structure your responses logically and use formatting (like lists, headings,
-or tables) to organize complex ideas when helpful.
+Structure your responses logically with short paragraphs, headings, and bullet
+lists when helpful.
+
+Do not use markdown tables.
 
 Never use LaTeX notation or math delimiters like `$...$`, `\\(...\\)`,
 or `\\[...\\]`. For formulas, use plain text or simple Unicode symbols

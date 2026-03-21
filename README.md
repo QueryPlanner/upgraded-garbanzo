@@ -117,8 +117,12 @@ Ask the bot to schedule reminders using natural language:
 - `"Remind me to take a break in 30 minutes"`
 - `"Remind me about the meeting at 3pm today"`
 - `"Remind me tomorrow at 9am to check emails"`
+- `"Remind me every day at 9am to review my tasks"`
+- `"Remind me every Monday at 8:30 to plan the week"`
+- `"Remind me every 15 minutes to stretch"`
 
-Reminders are stored persistently in SQLite and sent via Telegram push notifications.
+One-time and recurring reminders are stored persistently in SQLite and sent via
+Telegram push notifications.
 
 ## Documentation
 

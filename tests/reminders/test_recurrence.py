@@ -62,24 +62,24 @@ class TestGetNextTriggerTime:
 
     def test_with_reference_time(self) -> None:
         """Test with explicit reference time."""
-        reference = datetime(2026, 3, 21, 10, 0, tzinfo=UTC)
-        result = get_next_trigger_time("0 12 * * *", "UTC", reference)
+        reference_time = datetime(2026, 3, 21, 10, 0, tzinfo=UTC)
+        result = get_next_trigger_time("0 12 * * *", "UTC", reference_time)
         # Next 12:00 UTC after 10:00 UTC same day
         assert result.hour == 12
         assert result.day == 21
 
     def test_with_naive_reference_time(self) -> None:
         """Test with naive reference time (should be treated as UTC)."""
-        reference = datetime(2026, 3, 21, 10, 0)  # No tzinfo
-        result = get_next_trigger_time("0 12 * * *", "UTC", reference)
+        reference_time = datetime(2026, 3, 21, 10, 0)  # No tzinfo
+        result = get_next_trigger_time("0 12 * * *", "UTC", reference_time)
         assert result.tzinfo == UTC
 
     def test_with_timezone_conversion(self) -> None:
         """Test that timezone conversion is applied correctly."""
         # 9 AM IST = 3:30 AM UTC (IST is UTC+5:30)
-        reference = datetime(2026, 3, 21, 3, 0, tzinfo=UTC)
+        reference_time = datetime(2026, 3, 21, 3, 0, tzinfo=UTC)
         # This cron runs at 9 AM IST
-        result = get_next_trigger_time("0 9 * * *", "Asia/Kolkata", reference)
+        result = get_next_trigger_time("0 9 * * *", "Asia/Kolkata", reference_time)
         # Should be 9 AM IST = 3:30 AM UTC
         assert result.hour == 3
         assert result.minute == 30
@@ -92,10 +92,33 @@ class TestGetNextTriggerTime:
 
     def test_hourly_schedule(self) -> None:
         """Test hourly schedule returns next hour."""
-        reference = datetime(2026, 3, 21, 10, 30, tzinfo=UTC)
-        result = get_next_trigger_time("0 * * * *", "UTC", reference)
+        reference_time = datetime(2026, 3, 21, 10, 30, tzinfo=UTC)
+        result = get_next_trigger_time("0 * * * *", "UTC", reference_time)
         assert result.hour == 11
         assert result.minute == 0
+
+    def test_future_utc_with_kolkata_reference(self) -> None:
+        """Next fire after a UTC reference in another timezone's cron."""
+        reference_time = datetime(2026, 3, 20, 12, 7, tzinfo=UTC)
+        next_trigger_time = get_next_trigger_time(
+            "*/15 * * * *",
+            "Asia/Kolkata",
+            reference_time=reference_time,
+        )
+
+        assert next_trigger_time.tzinfo == UTC
+        assert next_trigger_time > reference_time
+        assert next_trigger_time.minute in {0, 15, 30, 45}
+
+    def test_accepts_naive_reference_for_ny_cron(self) -> None:
+        """Naive reference is treated as UTC before local cron evaluation."""
+        next_trigger_time = get_next_trigger_time(
+            "0 9 * * *",
+            "America/New_York",
+            reference_time=datetime(2026, 3, 20, 12, 0, 0),
+        )
+
+        assert next_trigger_time.tzinfo == UTC
 
 
 class TestRecurringSchedule:

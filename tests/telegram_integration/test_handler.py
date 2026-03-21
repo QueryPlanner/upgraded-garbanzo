@@ -593,10 +593,11 @@ class TestProcessReminder:
         )
         assert expected_local in captured_message
         assert "[SCHEDULED REMINDER]" in captured_message
+        assert "Do not call tools." in captured_message
 
     @pytest.mark.asyncio
-    async def test_uses_user_id_as_session_id(self, mock_agent: MagicMock) -> None:
-        """Test that user_id is used as session_id for reminder context."""
+    async def test_uses_dedicated_session_id(self, mock_agent: MagicMock) -> None:
+        """Test that reminder delivery uses a dedicated reminder session."""
         handler = TelegramHandler(mock_agent, app_name="test-app")
 
         captured_session_id: str | None = None
@@ -617,8 +618,39 @@ class TestProcessReminder:
                 scheduled_time=datetime.now(UTC),
             )
 
-        # Reminder sessions use a dedicated session with suffix
         assert captured_session_id == f"user-42{REMINDER_SESSION_SUFFIX}"
+
+    @pytest.mark.asyncio
+    async def test_resets_dedicated_reminder_session(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test reminder delivery starts from a clean reminder-only session."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        async def mock_run_async(**kwargs: object) -> object:
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="OK")])
+            )
+
+        with (
+            patch.object(
+                handler,
+                "reset_session",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_reset,
+            patch.object(handler.runner, "run_async", mock_run_async),
+        ):
+            await handler.process_reminder(
+                user_id="user-42",
+                reminder_message="test",
+                scheduled_time=datetime.now(UTC),
+            )
+
+        mock_reset.assert_called_once_with(
+            user_id="user-42",
+            session_id=f"user-42{REMINDER_SESSION_SUFFIX}",
+        )
 
     @pytest.mark.asyncio
     async def test_uses_custom_session_id_when_provided(
@@ -679,6 +711,8 @@ class TestReminderPromptTemplate:
         """Test that template contains required placeholders."""
         assert "{reminder_message}" in REMINDER_PROMPT_TEMPLATE
         assert "{scheduled_time}" in REMINDER_PROMPT_TEMPLATE
+        assert "Do not call tools." in REMINDER_PROMPT_TEMPLATE
+        assert "already been scheduled and is firing now" in REMINDER_PROMPT_TEMPLATE
 
     def test_template_formats_correctly(self) -> None:
         """Test that template can be formatted without errors."""
