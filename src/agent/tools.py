@@ -16,6 +16,11 @@ from .fitness import (
     get_fitness_storage,
 )
 from .reminders import Reminder, get_scheduler
+from .reminders.recurrence import (
+    RecurringSchedule,
+    get_next_trigger_time,
+    validate_cron_expression,
+)
 from .utils.app_timezone import (
     format_stored_instant_for_display,
     get_app_timezone,
@@ -25,6 +30,13 @@ from .utils.app_timezone import (
 )
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_RECURRENCE_MESSAGE = (
+    "Recurring reminders must use a 5-field cron expression in the app "
+    "timezone, for example '* * * * *' for every minute, "
+    "'*/15 * * * *' for every 15 minutes, or '30 8 * * 1' for Mondays "
+    "at 08:30."
+)
 
 
 def example_tool(
@@ -83,21 +95,31 @@ def get_current_datetime(tool_context: ToolContext) -> dict[str, Any]:
 async def schedule_reminder(
     tool_context: ToolContext,
     message: str,
-    reminder_datetime: str,
+    reminder_datetime: str | None = None,
+    recurrence: str | None = None,
 ) -> dict[str, Any]:
     """Schedule a reminder to be sent at a specific time.
 
-    The reminder will be sent as a Telegram message to the user.
+    The reminder will be delivered through the agent as a Telegram message.
+    The stored message is shown back to the agent when the reminder fires, so
+    ``message`` should be a self-contained instruction for what the user should
+    receive at delivery time. If the reminder should produce fresh generated
+    content, describe that outcome directly in ``message`` instead of writing
+    scheduling meta text.
 
     Args:
         tool_context: ADK ToolContext with user_id in state.
-        message: The reminder message to send (max 500 characters).
-        reminder_datetime: When to fire, in the app local timezone (default IST /
-            Asia/Kolkata; set AGENT_TIMEZONE to change). Use wall-clock strings such
-            as '2026-03-15 14:30' (14:30 IST), the iso_datetime from
-            get_current_datetime, or relative phrases like 'in 30 minutes' or
-            'tomorrow at 9am' (anchored to local wall clock). Stored as UTC
-            internally for ordering.
+        message: Self-contained delivery instruction for the future reminder
+            (max 500 characters). The fired reminder passes it back through the
+            agent to generate the final user-facing message.
+        reminder_datetime: For one-time reminders, when to fire in the app
+            local timezone (default IST / Asia/Kolkata; set AGENT_TIMEZONE to
+            change). Use wall-clock strings such as '2026-03-15 14:30', the
+            ``iso_datetime`` from ``get_current_datetime``, or relative phrases
+            like 'in 30 minutes' or 'tomorrow at 9am'.
+        recurrence: Optional recurring schedule as a 5-field cron expression in
+            the app timezone. Translate user cadence into cron before calling
+            this tool. Examples: '* * * * *', '*/15 * * * *', '30 8 * * 1'.
 
     Returns:
         A dictionary with status, reminder_id, and confirmation message.
@@ -113,16 +135,28 @@ async def schedule_reminder(
             "message": "Cannot schedule reminder: user not identified.",
         }
 
-    # Parse the datetime
     try:
-        trigger_time = _parse_reminder_datetime(reminder_datetime)
+        reminder_schedule = _build_reminder_schedule(
+            reminder_datetime=reminder_datetime,
+            recurrence=recurrence,
+        )
     except ValueError as e:
-        logger.warning(f"Failed to parse datetime '{reminder_datetime}': {e}")
+        logger.warning(
+            "Failed to parse reminder schedule (datetime=%r recurrence=%r): %s",
+            reminder_datetime,
+            recurrence,
+            e,
+        )
+        error_message = str(e)
+        if not recurrence:
+            error_message = (
+                "Could not understand the time. Use IST/local wall time, e.g. "
+                "'2026-03-15 14:30', get_current_datetime's iso_datetime, or "
+                "'in 30 minutes' / 'tomorrow at 9am'."
+            )
         return {
             "status": "error",
-            "message": "Could not understand the time. Use IST/local wall time, e.g. "
-            "'2026-03-15 14:30', get_current_datetime's iso_datetime, or "
-            "'in 30 minutes' / 'tomorrow at 9am'.",
+            "message": error_message,
         }
 
     # Validate message length
@@ -132,7 +166,7 @@ async def schedule_reminder(
             "message": "Reminder message too long (max 500 characters).",
         }
 
-    if trigger_time <= now_utc():
+    if reminder_schedule["trigger_time"] <= now_utc():
         return {
             "status": "error",
             "message": "The reminder time must be in the future.",
@@ -144,21 +178,35 @@ async def schedule_reminder(
         reminder_id = await scheduler.schedule_reminder(
             user_id=user_id,
             message=message,
-            trigger_time=trigger_time,
+            trigger_time=reminder_schedule["trigger_time"],
+            recurrence_rule=reminder_schedule["recurrence_rule"],
+            recurrence_text=reminder_schedule["recurrence_text"],
+            timezone_name=reminder_schedule["timezone_name"],
         )
 
-        display_time = format_stored_instant_for_display(utc_iso_seconds(trigger_time))
+        display_time = format_stored_instant_for_display(
+            utc_iso_seconds(reminder_schedule["trigger_time"])
+        )
         logger.info(
             "Scheduled reminder %s for user %s at %s (stored as UTC)",
             reminder_id,
             user_id,
-            utc_iso_seconds(trigger_time),
+            utc_iso_seconds(reminder_schedule["trigger_time"]),
         )
+
+        confirmation_prefix = "Recurring reminder scheduled"
+        if reminder_schedule["recurrence_rule"] is None:
+            confirmation_prefix = "Reminder scheduled"
+
+        recurrence_suffix = ""
+        if reminder_schedule["recurrence_text"]:
+            recurrence_suffix = f" ({reminder_schedule['recurrence_text']})"
 
         return {
             "status": "success",
             "reminder_id": reminder_id,
-            "message": f"Reminder scheduled for {display_time}. "
+            "message": f"{confirmation_prefix}{recurrence_suffix}. Next send: "
+            f"{display_time}. "
             f"I'll send you: '{message[:50]}{'...' if len(message) > 50 else ''}'",
         }
     except Exception as e:
@@ -298,12 +346,76 @@ def _parse_reminder_datetime(datetime_str: str) -> datetime:
 
 def _format_reminder(reminder: Reminder) -> dict[str, Any]:
     """Format a reminder for display (trigger time in app timezone, with seconds)."""
+    next_trigger_time = format_stored_instant_for_display(reminder.trigger_time)
     return {
         "id": reminder.id,
         "message": reminder.message,
-        "trigger_time": format_stored_instant_for_display(reminder.trigger_time),
+        "trigger_time": next_trigger_time,
+        "next_trigger_time": next_trigger_time,
         "is_sent": reminder.is_sent,
+        "is_recurring": reminder.is_recurring,
+        "schedule_type": "recurring" if reminder.is_recurring else "one_time",
+        "recurrence": reminder.recurrence_text,
     }
+
+
+def _build_reminder_schedule(
+    reminder_datetime: str | None,
+    recurrence: str | None,
+) -> dict[str, Any]:
+    """Build the normalized schedule for one-shot or recurring reminders."""
+    normalized_recurrence = (recurrence or "").strip()
+    if not normalized_recurrence:
+        if not reminder_datetime:
+            raise ValueError(
+                "One-time reminders need reminder_datetime. Use a time like "
+                "'2026-03-15 14:30', 'in 30 minutes', or 'tomorrow at 9am'."
+            )
+
+        return {
+            "trigger_time": _parse_reminder_datetime(reminder_datetime),
+            "recurrence_rule": None,
+            "recurrence_text": None,
+            "timezone_name": None,
+        }
+
+    if reminder_datetime:
+        raise ValueError(
+            "Recurring reminders use recurrence only. Omit reminder_datetime "
+            "and pass a 5-field cron expression. " + SUPPORTED_RECURRENCE_MESSAGE
+        )
+
+    recurring_schedule = _parse_recurring_schedule(normalized_recurrence)
+    next_trigger_time = get_next_trigger_time(
+        recurring_schedule.cron_expression,
+        recurring_schedule.timezone_name,
+    )
+
+    return {
+        "trigger_time": next_trigger_time,
+        "recurrence_rule": recurring_schedule.cron_expression,
+        "recurrence_text": recurring_schedule.description,
+        "timezone_name": recurring_schedule.timezone_name,
+    }
+
+
+def _parse_recurring_schedule(recurrence: str) -> RecurringSchedule:
+    """Validate a cron-style recurring schedule for reminder storage."""
+    timezone_name = get_app_timezone().key
+    normalized_recurrence = " ".join(recurrence.strip().split())
+    try:
+        cron_expression = validate_cron_expression(normalized_recurrence, timezone_name)
+    except ValueError as error:
+        raise ValueError(
+            "Could not understand the recurring schedule. "
+            + SUPPORTED_RECURRENCE_MESSAGE
+        ) from error
+
+    return RecurringSchedule(
+        cron_expression=cron_expression,
+        description=f"cron: {cron_expression}",
+        timezone_name=timezone_name,
+    )
 
 
 # ============================================================================
@@ -432,6 +544,8 @@ async def list_calories(
             return {
                 "status": "success",
                 "entries": [],
+                "count": 0,
+                "total_calories": 0,
                 "message": "No calorie entries found.",
             }
 

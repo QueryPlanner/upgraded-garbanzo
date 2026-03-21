@@ -6,13 +6,14 @@ the ADK agent for personalized, context-aware responses.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
 
 from ..utils.app_timezone import get_app_timezone, now_utc, utc_iso_seconds
+from .recurrence import get_next_trigger_time
 from .storage import Reminder, get_storage
 
 if TYPE_CHECKING:
@@ -194,7 +195,7 @@ class ReminderScheduler:
                 )
 
             # Mark as sent
-            await self.storage.mark_sent(reminder.id)
+            await self._complete_reminder_delivery(reminder)
             logger.info(f"Sent reminder {reminder.id} to user {reminder.user_id}")
 
         except Exception:
@@ -202,11 +203,36 @@ class ReminderScheduler:
                 f"Failed to send reminder {reminder.id} to user {reminder.user_id}"
             )
 
+    async def _complete_reminder_delivery(self, reminder: Reminder) -> None:
+        """Finalize a delivery by marking one-shot reminders sent or rescheduling."""
+        if reminder.id is None:
+            raise ValueError("Reminder must have an ID before completion")
+
+        if not reminder.is_recurring:
+            await self.storage.mark_sent(reminder.id)
+            return
+
+        timezone_name = reminder.timezone_name or str(get_app_timezone())
+        current_trigger_time = _parse_stored_trigger_time(reminder.trigger_time)
+        next_reference_time = current_trigger_time + timedelta(seconds=1)
+        next_trigger_time = get_next_trigger_time(
+            reminder.recurrence_rule or "",
+            timezone_name,
+            reference_time=next_reference_time,
+        )
+        await self.storage.reschedule_reminder(
+            reminder.id,
+            utc_iso_seconds(next_trigger_time),
+        )
+
     async def schedule_reminder(
         self,
         user_id: str,
         message: str,
         trigger_time: datetime,
+        recurrence_rule: str | None = None,
+        recurrence_text: str | None = None,
+        timezone_name: str | None = None,
     ) -> int:
         """Schedule a new reminder.
 
@@ -222,6 +248,9 @@ class ReminderScheduler:
             user_id=user_id,
             message=message,
             trigger_time=utc_iso_seconds(trigger_time),
+            recurrence_rule=recurrence_rule,
+            recurrence_text=recurrence_text,
+            timezone_name=timezone_name,
             created_at=now_utc().isoformat(timespec="seconds"),
         )
 
@@ -269,3 +298,12 @@ def get_scheduler() -> ReminderScheduler:
     if _scheduler is None:
         _scheduler = ReminderScheduler()
     return _scheduler
+
+
+def _parse_stored_trigger_time(trigger_time: str) -> datetime:
+    """Parse an ISO timestamp stored in reminder persistence."""
+    normalized_trigger_time = trigger_time.replace("Z", "+00:00")
+    parsed_trigger_time = datetime.fromisoformat(normalized_trigger_time)
+    if parsed_trigger_time.tzinfo is None:
+        return parsed_trigger_time.replace(tzinfo=UTC)
+    return parsed_trigger_time.astimezone(UTC)

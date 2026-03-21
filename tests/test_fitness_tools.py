@@ -423,3 +423,306 @@ class TestContextFileTools:
 
         assert result["status"] == "error"
         assert "empty" in result["message"].lower()
+
+
+class TestFitnessToolsErrors:
+    """Tests for fitness tools error handling."""
+
+    @pytest.mark.asyncio
+    async def test_add_calories_exception(self, mock_tool_context: ToolContext) -> None:
+        """Test add_calories handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.add_calorie_entry = AsyncMock(
+                side_effect=Exception("DB error")
+            )
+            mock_get_storage.return_value = mock_storage
+
+            result = await add_calories(
+                mock_tool_context,
+                food_item="Test Food",
+                calories=500,
+            )
+
+            assert result["status"] == "error"
+            assert "Failed to log calories" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_list_calories_no_user(
+        self, mock_tool_context_no_user: ToolContext
+    ) -> None:
+        """Test list_calories without user_id."""
+        result = await list_calories(mock_tool_context_no_user)
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_list_calories_exception(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test list_calories handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_calorie_entries = AsyncMock(
+                side_effect=Exception("DB error")
+            )
+            mock_get_storage.return_value = mock_storage
+
+            result = await list_calories(mock_tool_context)
+
+            assert result["status"] == "error"
+            assert "Failed to list calories" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_list_calories_with_meal_type_filter(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test list_calories with meal_type filter."""
+        from agent.fitness import CalorieEntry, MealType
+
+        mock_entry = CalorieEntry(
+            id=1,
+            user_id="test_user",
+            date="2026-03-15",
+            food_item="Test Food",
+            calories=500,
+            meal_type=MealType.LUNCH,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_calorie_entries = AsyncMock(return_value=[mock_entry])
+            mock_get_storage.return_value = mock_storage
+
+            result = await list_calories(mock_tool_context, meal_type="lunch")
+
+            assert result["status"] == "success"
+            assert result["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_list_calories_with_meal_type_filter_no_match(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test list_calories with meal_type filter that doesn't match."""
+        from agent.fitness import CalorieEntry, MealType
+
+        mock_entry = CalorieEntry(
+            id=1,
+            user_id="test_user",
+            date="2026-03-15",
+            food_item="Test Food",
+            calories=500,
+            meal_type=MealType.LUNCH,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_calorie_entries = AsyncMock(return_value=[mock_entry])
+            mock_get_storage.return_value = mock_storage
+
+            result = await list_calories(mock_tool_context, meal_type="breakfast")
+
+            assert result["status"] == "success"
+            assert result["entries"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_calorie_stats_no_user(
+        self, mock_tool_context_no_user: ToolContext
+    ) -> None:
+        """Test get_calorie_stats without user_id."""
+        result = await get_calorie_stats(mock_tool_context_no_user)
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_get_calorie_stats_exception(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test get_calorie_stats handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_calorie_stats = AsyncMock(
+                side_effect=Exception("DB error")
+            )
+            mock_get_storage.return_value = mock_storage
+
+            result = await get_calorie_stats(mock_tool_context)
+
+            assert result["status"] == "error"
+            assert "Failed to get stats" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_log_workout_no_user(
+        self, mock_tool_context_no_user: ToolContext
+    ) -> None:
+        """Test log_workout without user_id."""
+        result = await log_workout(
+            mock_tool_context_no_user,
+            exercise_name="Test",
+        )
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_log_workout_exception(self, mock_tool_context: ToolContext) -> None:
+        """Test log_workout handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.add_workout_entry = AsyncMock(
+                side_effect=Exception("DB error")
+            )
+            mock_get_storage.return_value = mock_storage
+
+            result = await log_workout(
+                mock_tool_context,
+                exercise_name="Test",
+            )
+
+            assert result["status"] == "error"
+            assert "Failed to log workout" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_log_workout_with_all_details(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test log_workout with all optional details."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.add_workout_entry = AsyncMock(return_value=1)
+            mock_get_storage.return_value = mock_storage
+
+            result = await log_workout(
+                mock_tool_context,
+                exercise_name="Running",
+                exercise_type="cardio",
+                duration_minutes=30,
+                distance_km=5.0,
+            )
+
+            assert result["status"] == "success"
+            assert "30min" in result["message"]
+            assert "5.0km" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_list_workouts_no_user(
+        self, mock_tool_context_no_user: ToolContext
+    ) -> None:
+        """Test list_workouts without user_id."""
+        result = await list_workouts(mock_tool_context_no_user)
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_list_workouts_empty(self, mock_tool_context: ToolContext) -> None:
+        """Test list_workouts when empty."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_workout_entries = AsyncMock(return_value=[])
+            mock_get_storage.return_value = mock_storage
+
+            result = await list_workouts(mock_tool_context)
+
+            assert result["status"] == "success"
+            assert result["entries"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_workouts_exception(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test list_workouts handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_workout_entries = AsyncMock(
+                side_effect=Exception("DB error")
+            )
+            mock_get_storage.return_value = mock_storage
+
+            result = await list_workouts(mock_tool_context)
+
+            assert result["status"] == "error"
+            assert "Failed to list workouts" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_get_workout_stats_no_user(
+        self, mock_tool_context_no_user: ToolContext
+    ) -> None:
+        """Test get_workout_stats without user_id."""
+        result = await get_workout_stats(mock_tool_context_no_user)
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_get_workout_stats_exception(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test get_workout_stats handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.get_workout_stats = AsyncMock(
+                side_effect=Exception("DB error")
+            )
+            mock_get_storage.return_value = mock_storage
+
+            result = await get_workout_stats(mock_tool_context)
+
+            assert result["status"] == "error"
+            assert "Failed to get stats" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_delete_fitness_entry_no_user(
+        self, mock_tool_context_no_user: ToolContext
+    ) -> None:
+        """Test delete_fitness_entry without user_id."""
+        result = await delete_fitness_entry(
+            mock_tool_context_no_user,
+            entry_type="calorie",
+            entry_id=1,
+        )
+
+        assert result["status"] == "error"
+        assert "user not identified" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_delete_fitness_entry_not_found(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test delete_fitness_entry when entry not found."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.delete_entry = AsyncMock(return_value=False)
+            mock_get_storage.return_value = mock_storage
+
+            result = await delete_fitness_entry(
+                mock_tool_context,
+                entry_type="calorie",
+                entry_id=999,
+            )
+
+            assert result["status"] == "error"
+            assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_delete_fitness_entry_exception(
+        self, mock_tool_context: ToolContext
+    ) -> None:
+        """Test delete_fitness_entry handles exceptions."""
+        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+            mock_storage = AsyncMock()
+            mock_storage.delete_entry = AsyncMock(side_effect=Exception("DB error"))
+            mock_get_storage.return_value = mock_storage
+
+            result = await delete_fitness_entry(
+                mock_tool_context,
+                entry_type="calorie",
+                entry_id=1,
+            )
+
+            assert result["status"] == "error"
+            assert "Failed to delete entry" in result["message"]
