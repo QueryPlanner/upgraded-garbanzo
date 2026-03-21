@@ -1,6 +1,8 @@
 """Tests for telegram_bot module."""
 
 import asyncio
+import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,8 +11,10 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from agent.telegram.bot import (
+    TELEGRAM_DOCUMENT_CAPTION_MAX,
     _render_markdown_as_html,
     _send_long_message,
+    _send_queued_telegram_documents,
     _send_validated_chunk,
     _split_and_send,
     create_application,
@@ -19,6 +23,8 @@ from agent.telegram.bot import (
     reset_command,
     start_command,
 )
+from agent.telegram.handler import TelegramAgentReply
+from agent.utils.telegram_outbox import PendingTelegramFile
 
 
 @pytest.fixture
@@ -41,6 +47,7 @@ def mock_context() -> MagicMock:
     context = MagicMock()
     context.bot = MagicMock()
     context.bot.send_chat_action = AsyncMock()
+    context.bot.send_document = AsyncMock()
     return context
 
 
@@ -196,7 +203,7 @@ class TestHandleMessage:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value="Hello! How can I help?",
+            return_value=TelegramAgentReply(text="Hello! How can I help?"),
         ):
             await handle_message(mock_update, mock_context)
 
@@ -213,7 +220,7 @@ class TestHandleMessage:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value="Response",
+            return_value=TelegramAgentReply(text="Response"),
         ):
             await handle_message(mock_update, mock_context)
             # Typing runs in a background task; yield so it can complete.
@@ -313,7 +320,7 @@ class TestHandleMessage:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value=long_response,
+            return_value=TelegramAgentReply(text=long_response),
         ):
             await handle_message(mock_update, mock_context)
 
@@ -330,7 +337,7 @@ class TestHandleMessage:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value=short_response,
+            return_value=TelegramAgentReply(text=short_response),
         ):
             await handle_message(mock_update, mock_context)
 
@@ -350,7 +357,7 @@ class TestHandleMessage:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value=r"\((1-\text{tax rate})\)",
+            return_value=TelegramAgentReply(text=r"\((1-\text{tax rate})\)"),
         ):
             await handle_message(mock_update, mock_context)
 
@@ -378,7 +385,7 @@ class TestHandleMessage:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value=response,
+            return_value=TelegramAgentReply(text=response),
         ):
             await handle_message(mock_update, mock_context)
 
@@ -389,6 +396,63 @@ class TestHandleMessage:
             assert mock_update.message.reply_text.call_args.kwargs["parse_mode"] == (
                 ParseMode.HTML
             )
+
+    @pytest.mark.asyncio
+    async def test_sends_queued_documents_after_reply(
+        self, mock_update: MagicMock, mock_context: MagicMock, tmp_path: Path
+    ) -> None:
+        """Files queued by tools are sent via send_document after the text reply."""
+        doc_path = tmp_path / "attachment.txt"
+        doc_path.write_text("payload", encoding="utf-8")
+        doc = PendingTelegramFile(
+            path=doc_path,
+            caption="file caption",
+            filename="attachment.txt",
+        )
+
+        with patch(
+            "agent.telegram.bot.process_message",
+            new_callable=AsyncMock,
+            return_value=TelegramAgentReply(text="Here is the file.", documents=(doc,)),
+        ):
+            await handle_message(mock_update, mock_context)
+
+        mock_context.bot.send_document.assert_called_once()
+        kwargs = mock_context.bot.send_document.call_args.kwargs
+        assert kwargs["chat_id"] == 67890
+        assert kwargs["caption"] == "file caption"
+        assert kwargs["document"].filename == "attachment.txt"
+        assert not doc_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_send_queued_truncates_long_caption(self, tmp_path: Path) -> None:
+        bot = MagicMock()
+        bot.send_document = AsyncMock()
+        long_caption = "x" * (TELEGRAM_DOCUMENT_CAPTION_MAX + 500)
+        doc_path = tmp_path / "f.txt"
+        doc_path.write_text("a", encoding="utf-8")
+        doc = PendingTelegramFile(path=doc_path, caption=long_caption, filename="f.txt")
+        await _send_queued_telegram_documents(bot, 1, (doc,))
+        sent = bot.send_document.call_args.kwargs["caption"]
+        assert len(sent) == TELEGRAM_DOCUMENT_CAPTION_MAX
+        assert sent.endswith("…")
+        assert not doc_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_send_queued_logs_on_telegram_error(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bot = MagicMock()
+        bot.send_document = AsyncMock(side_effect=TelegramError("network"))
+        doc_path = tmp_path / "f.txt"
+        doc_path.write_text("a", encoding="utf-8")
+        doc = PendingTelegramFile(path=doc_path, caption=None, filename="x.txt")
+        with caplog.at_level(logging.WARNING, logger="agent.telegram.bot"):
+            await _send_queued_telegram_documents(bot, 99, (doc,))
+        assert any(
+            "Failed to send Telegram document" in r.message for r in caplog.records
+        )
+        assert not doc_path.exists()
 
 
 class TestSendLongMessage:

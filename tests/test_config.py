@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from agent.utils.config import (
     ServerEnv,
+    get_context_dir,
     get_data_dir,
     initialize_environment,
 )
@@ -479,3 +480,30 @@ class TestGetDataDir:
 
         assert resolved == mock_default_dir.resolve()
         assert resolved.is_dir()
+
+
+class TestGetContextDir:
+    """``.context`` must follow AGENT_DIR in Docker (see Dockerfile)."""
+
+    def test_agent_dir_yields_dot_context_subdir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("AGENT_CONTEXT_DIR", raising=False)
+        app_src = tmp_path / "app_src"
+        monkeypatch.setenv("AGENT_DIR", str(app_src))
+
+        resolved = get_context_dir()
+
+        assert resolved == (app_src / ".context").resolve()
+        assert resolved.is_dir()
+
+    def test_agent_context_dir_overrides_agent_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        custom = tmp_path / "custom_context"
+        monkeypatch.setenv("AGENT_CONTEXT_DIR", str(custom))
+        monkeypatch.setenv("AGENT_DIR", str(tmp_path / "ignored_src"))
+
+        resolved = get_context_dir()
+
+        assert resolved == custom.resolve()

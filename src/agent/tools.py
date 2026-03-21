@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import os
+import shutil
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dateparser
 from google.adk.tools import ToolContext
@@ -29,6 +31,11 @@ from .utils.app_timezone import (
     naive_local_now,
     now_utc,
     utc_iso_seconds,
+)
+from .utils.config import get_context_dir, get_data_dir
+from .utils.telegram_outbox import (
+    TelegramFileOutboxError,
+    register_telegram_file_for_send,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +181,264 @@ async def docker_bash_execute(
         "output_truncated": truncated,
         "cwd": workdir,
     }
+
+
+_MAX_TELEGRAM_UPLOAD_BYTES = 100 * 1024 * 1024
+_MAX_TELEGRAM_INLINE_TEXT_BYTES = 512 * 1024
+# Max length for treating ``text_file_body`` as a single-line filesystem path.
+_MAX_PATHLIKE_TEXT_FILE_BODY_LEN = 4096
+
+
+def _validate_agent_data_relative_path(relative_path: str) -> Path:
+    """Resolve a path under the agent data directory (no traversal)."""
+    rel = relative_path.replace("\\", "/").strip("/")
+    if not rel:
+        raise ValueError("agent_data_path cannot be empty")
+    parts = [p for p in rel.split("/") if p]
+    for part in parts:
+        if part in (".", ".."):
+            raise ValueError("Invalid path segment in agent_data_path")
+    base = get_data_dir().resolve()
+    full_path = (base / Path(*parts)).resolve()
+    full_path.relative_to(base)
+    return full_path
+
+
+def _resolve_agent_data_or_host_path(agent_data_path: str) -> Path:
+    """Resolve ``agent_data_path`` to a file path.
+
+    * **Absolute** path: ``~`` is expanded, then :meth:`pathlib.Path.resolve`.
+      Any regular file the process can read (e.g. ``/app/agent_data/x.png``).
+    * **Relative** path: must stay under ``get_data_dir()`` (no ``..``).
+    """
+    trimmed = agent_data_path.strip()
+    if not trimmed:
+        raise ValueError("agent_data_path cannot be empty")
+    expanded = Path(trimmed).expanduser()
+    if expanded.is_absolute():
+        return expanded.resolve()
+    return _validate_agent_data_relative_path(trimmed)
+
+
+def _stage_file_copy_for_telegram(source: Path, display_name: str) -> Path:
+    """Copy a source file into staging for upload and later deletion."""
+    staging_root = get_data_dir() / ".telegram_staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    safe = display_name.replace("/", "_").replace("\\", "_")[:200]
+    dest = staging_root / f"{uuid.uuid4().hex}_{safe}"
+    shutil.copy2(source, dest)
+    return dest
+
+
+def _stage_utf8_text_for_telegram(text: str, display_name: str) -> Path:
+    """Write UTF-8 text to a staged file."""
+    body = text.encode("utf-8")
+    if len(body) > _MAX_TELEGRAM_INLINE_TEXT_BYTES:
+        max_kib = _MAX_TELEGRAM_INLINE_TEXT_BYTES // 1024
+        raise ValueError(
+            f"text_file_body exceeds inline limit ({max_kib} KiB). "
+            "Write a larger file under agent data or .context first."
+        )
+    staging_root = get_data_dir() / ".telegram_staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    safe = display_name.replace("/", "_").replace("\\", "_")[:200]
+    dest = staging_root / f"{uuid.uuid4().hex}_{safe}"
+    dest.write_bytes(body)
+    return dest
+
+
+def _validate_single_download_filename(name: str) -> str:
+    cleaned = name.strip()
+    if not cleaned:
+        raise ValueError("text_file_name cannot be empty")
+    if "/" in cleaned or "\\" in cleaned:
+        raise ValueError("text_file_name must not contain path separators")
+    if cleaned in (".", ".."):
+        raise ValueError("Invalid text_file_name")
+    return cleaned
+
+
+def _existing_file_if_text_body_is_path_string(body: str) -> Path | None:
+    """If ``body`` is a single-line absolute (or ``~/``) path to a file, return it.
+
+    Models often mistakenly pass a host path in ``text_file_body``; without this,
+    the path string itself is UTF-8-encoded and sent as the file content.
+    """
+    trimmed = body.strip()
+    if not trimmed or len(trimmed) > _MAX_PATHLIKE_TEXT_FILE_BODY_LEN:
+        return None
+    if "\n" in trimmed or "\r" in trimmed:
+        return None
+    candidate = Path(trimmed).expanduser()
+    if not candidate.is_absolute() and not trimmed.startswith("~/"):
+        return None
+    resolved = candidate.resolve()
+    if not resolved.is_file():
+        return None
+    return resolved
+
+
+def _queue_telegram_send_file_copy(
+    source_path: Path,
+    *,
+    telegram_filename: str,
+    caption: str | None,
+    user_id: str,
+    log_fmt: str,
+) -> dict[str, Any]:
+    """Copy ``source_path`` to staging, register for send, return tool result dict."""
+    if not source_path.is_file():
+        return {
+            "status": "error",
+            "message": f"File not found or not a regular file: {source_path.name}",
+        }
+    file_size = source_path.stat().st_size
+    if file_size > _MAX_TELEGRAM_UPLOAD_BYTES:
+        return {
+            "status": "error",
+            "message": (
+                "File too large for Telegram (limit ~100 MiB). "
+                "Split or compress the content first."
+            ),
+        }
+    staged_path = _stage_file_copy_for_telegram(source_path, telegram_filename)
+    try:
+        register_telegram_file_for_send(
+            staged_path,
+            caption=caption,
+            filename=telegram_filename,
+        )
+    except TelegramFileOutboxError as e:
+        staged_path.unlink(missing_ok=True)
+        return {"status": "error", "message": str(e)}
+
+    logger.info(log_fmt, user_id, telegram_filename, file_size)
+    sent_msg = f"File '{telegram_filename}' will be sent to the user on Telegram."
+    return {
+        "status": "success",
+        "message": sent_msg,
+        "filename": telegram_filename,
+        "bytes": file_size,
+    }
+
+
+def send_telegram_file(
+    tool_context: ToolContext,
+    caption: str | None = None,
+    context_filename: str | None = None,
+    agent_data_path: str | None = None,
+    text_file_body: str | None = None,
+    text_file_name: str | None = None,
+) -> dict[str, Any]:
+    """Queue a file to send to the user on Telegram after your reply finishes.
+
+    Only works during a Telegram bot turn (not the HTTP API server alone).
+    Provide exactly one of: a ``.context`` file, a file path (see below), or
+    inline text saved as a small downloadable file.
+
+    Args:
+        tool_context: ADK ToolContext (must include ``user_id`` for Telegram).
+        caption: Optional short caption (Telegram truncates long captions).
+        context_filename: Single file name in ``.context/`` (same rules as
+            ``read_context_file``).
+        agent_data_path: Either a **relative** path under the agent data
+            directory (slashes OK; ``..`` forbidden), or an **absolute** path
+            to any regular file on the host (e.g. ``/app/agent_data/x.png``).
+        text_file_body: UTF-8 text to send as a new file (max 512 KiB). If this
+            is a **single-line absolute** path (or ``~/...``) to an existing file,
+            that file is sent instead (avoids accidentally sending the path
+            string as the file body).
+        text_file_name: Required with ``text_file_body`` (e.g. ``notes.txt``).
+
+    Returns:
+        Status and staging metadata, or an error message.
+    """
+    user_id = _get_user_id(tool_context)
+    if not user_id:
+        return {
+            "status": "error",
+            "message": (
+                "Cannot send files: user session has no user_id (Telegram only)."
+            ),
+        }
+
+    has_context = bool(context_filename and context_filename.strip())
+    has_data = bool(agent_data_path and agent_data_path.strip())
+    has_text = text_file_body is not None
+    mode_count = sum((has_context, has_data, has_text))
+    if mode_count != 1:
+        return {
+            "status": "error",
+            "message": (
+                "Provide exactly one of: context_filename, agent_data_path "
+                "(relative under agent data or absolute file path), "
+                "or text_file_body (+ text_file_name)."
+            ),
+        }
+
+    try:
+        if has_text:
+            body = cast(str, text_file_body)
+            if text_file_name is None or not str(text_file_name).strip():
+                return {
+                    "status": "error",
+                    "message": "text_file_name is required when using text_file_body.",
+                }
+            telegram_filename = _validate_single_download_filename(text_file_name)
+            mistaken_path = _existing_file_if_text_body_is_path_string(body)
+            if mistaken_path is not None:
+                return _queue_telegram_send_file_copy(
+                    mistaken_path,
+                    telegram_filename=telegram_filename,
+                    caption=caption,
+                    user_id=user_id,
+                    log_fmt=(
+                        "Queued Telegram file (path in text_file_body) "
+                        "for user_id=%s name=%s bytes=%s"
+                    ),
+                )
+            staged = _stage_utf8_text_for_telegram(body, telegram_filename)
+            try:
+                register_telegram_file_for_send(
+                    staged,
+                    caption=caption,
+                    filename=telegram_filename,
+                )
+            except TelegramFileOutboxError as e:
+                staged.unlink(missing_ok=True)
+                return {"status": "error", "message": str(e)}
+            logger.info(
+                "Queued Telegram file from inline text for user_id=%s name=%s",
+                user_id,
+                telegram_filename,
+            )
+            sent_msg = (
+                f"File '{telegram_filename}' will be sent to the user on Telegram."
+            )
+            return {
+                "status": "success",
+                "message": sent_msg,
+                "filename": telegram_filename,
+                "bytes": staged.stat().st_size,
+            }
+
+        if has_context:
+            ctx_name = cast(str, context_filename).strip()
+            source_path = _validate_context_filename(ctx_name)
+        else:
+            data_rel = cast(str, agent_data_path).strip()
+            source_path = _resolve_agent_data_or_host_path(data_rel)
+        telegram_filename = source_path.name
+
+        return _queue_telegram_send_file_copy(
+            source_path,
+            telegram_filename=telegram_filename,
+            caption=caption,
+            user_id=user_id,
+            log_fmt="Queued Telegram file for user_id=%s name=%s bytes=%s",
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
 
 
 def example_tool(
@@ -1121,9 +1386,6 @@ def get_youtube_transcript(
 # CONTEXT FILE TOOLS (Secure file operations for .context/ directory)
 # ============================================================================
 
-# Context directory is relative to project root
-_CONTEXT_DIR = Path(__file__).parent.parent.parent / ".context"
-
 
 def _validate_context_filename(filename: str) -> Path:
     """Validate and resolve a filename within the .context/ directory.
@@ -1148,12 +1410,14 @@ def _validate_context_filename(filename: str) -> Path:
             f"Invalid filename '{filename}': path separators and '..' not allowed"
         )
 
+    context_dir = get_context_dir().resolve()
+
     # Resolve the full path
-    full_path = (_CONTEXT_DIR / normalized).resolve()
+    full_path = (context_dir / normalized).resolve()
 
     # Ensure the resolved path is within the context directory
     try:
-        full_path.relative_to(_CONTEXT_DIR.resolve())
+        full_path.relative_to(context_dir)
     except ValueError:
         raise ValueError(
             f"Invalid filename '{filename}': must be within .context/ directory"
@@ -1216,9 +1480,6 @@ def write_context_file(
     except ValueError as e:
         return {"status": "error", "message": str(e)}
 
-    # Ensure the .context directory exists
-    _CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
-
     try:
         file_path.write_text(content, encoding="utf-8")
         return {
@@ -1276,17 +1537,17 @@ def list_context_files(
     Returns:
         A dictionary with status and list of files or error message.
     """
-    if not _CONTEXT_DIR.exists():
-        return {
-            "status": "success",
-            "files": [],
-            "message": "No .context/ directory found.",
-        }
-
     try:
+        context_dir = get_context_dir()
+        if not context_dir.exists():
+            return {
+                "status": "success",
+                "files": [],
+                "message": "No .context/ directory found.",
+            }
         files: list[dict[str, int | str]] = [
             {"name": f.name, "size": f.stat().st_size}
-            for f in _CONTEXT_DIR.iterdir()
+            for f in context_dir.iterdir()
             if f.is_file() and not f.name.startswith(".")
         ]
         files.sort(key=lambda x: str(x["name"]))

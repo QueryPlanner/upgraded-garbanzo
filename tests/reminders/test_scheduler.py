@@ -10,6 +10,8 @@ import pytest
 
 from agent.reminders.scheduler import ReminderScheduler
 from agent.reminders.storage import Reminder, ReminderStorage
+from agent.telegram.handler import TelegramAgentReply
+from agent.utils.telegram_outbox import PendingTelegramFile
 
 
 @pytest.fixture
@@ -139,11 +141,14 @@ class TestAgentAwareReminders:
         # Set up mocks
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock()
+        mock_bot.send_document = AsyncMock()
         scheduler.set_bot(mock_bot)
 
         mock_handler = MagicMock()
         mock_handler.process_reminder = AsyncMock(
-            return_value="Hey! Don't forget about lunch! Want me to order something?"
+            return_value=TelegramAgentReply(
+                text="Hey! Don't forget about lunch! Want me to order something?"
+            )
         )
         scheduler.set_handler(mock_handler)
 
@@ -171,6 +176,88 @@ class TestAgentAwareReminders:
         mock_bot.send_message.assert_called_once()
         call_args = mock_bot.send_message.call_args
         assert "Hey! Don't forget about lunch!" in call_args[1]["text"]
+
+    @pytest.mark.asyncio
+    async def test_send_reminder_delivers_attached_documents(
+        self, isolated_storage: ReminderStorage, tmp_path: Path
+    ) -> None:
+        """Agent reply documents are sent with send_document after the text."""
+        scheduler = ReminderScheduler()
+        scheduler.storage = isolated_storage
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock()
+        mock_bot.send_document = AsyncMock()
+        scheduler.set_bot(mock_bot)
+
+        doc_path = tmp_path / "r.txt"
+        doc_path.write_text("r", encoding="utf-8")
+        doc = PendingTelegramFile(path=doc_path, caption="c", filename="r.txt")
+
+        mock_handler = MagicMock()
+        mock_handler.process_reminder = AsyncMock(
+            return_value=TelegramAgentReply(text="Reminder body", documents=(doc,))
+        )
+        scheduler.set_handler(mock_handler)
+
+        trigger_time = datetime.now(UTC) - timedelta(minutes=1)
+        reminder = Reminder(
+            id=4,
+            user_id="test_user",
+            message="m",
+            trigger_time=trigger_time.isoformat(),
+            is_sent=False,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+        await scheduler._send_reminder(reminder)
+
+        mock_bot.send_document.assert_called_once()
+        assert mock_bot.send_document.call_args.kwargs["chat_id"] == "test_user"
+        assert not doc_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_send_reminder_truncates_long_document_caption(
+        self, isolated_storage: ReminderStorage, tmp_path: Path
+    ) -> None:
+        """Document captions over Telegram limit are shortened with an ellipsis."""
+        scheduler = ReminderScheduler()
+        scheduler.storage = isolated_storage
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock()
+        mock_bot.send_document = AsyncMock()
+        scheduler.set_bot(mock_bot)
+
+        doc_path = tmp_path / "cap.txt"
+        doc_path.write_text("r", encoding="utf-8")
+        long_caption = "z" * 1300
+        doc = PendingTelegramFile(
+            path=doc_path, caption=long_caption, filename="cap.txt"
+        )
+
+        mock_handler = MagicMock()
+        mock_handler.process_reminder = AsyncMock(
+            return_value=TelegramAgentReply(text="Reminder body", documents=(doc,))
+        )
+        scheduler.set_handler(mock_handler)
+
+        trigger_time = datetime.now(UTC) - timedelta(minutes=1)
+        reminder = Reminder(
+            id=5,
+            user_id="test_user",
+            message="m",
+            trigger_time=trigger_time.isoformat(),
+            is_sent=False,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+        await scheduler._send_reminder(reminder)
+
+        sent_cap = mock_bot.send_document.call_args.kwargs["caption"]
+        assert len(sent_cap) == 1024
+        assert sent_cap.endswith("…")
+        assert not doc_path.exists()
 
     @pytest.mark.asyncio
     async def test_send_reminder_fallback_without_handler(

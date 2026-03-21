@@ -49,6 +49,7 @@ from .tools import (  # noqa: E402
     log_workout,
     read_context_file,
     schedule_reminder,
+    send_telegram_file,
     write_context_file,
 )
 
@@ -138,6 +139,8 @@ root_agent = LlmAgent(
         get_youtube_transcript,
         # Docker-only shell (see docker_bash_execute docstring)
         docker_bash_execute,
+        # Telegram: queue file for send after reply (see send_telegram_file)
+        send_telegram_file,
         # Skills (lazy-loaded toolsets)
         skill_toolset,
     ],

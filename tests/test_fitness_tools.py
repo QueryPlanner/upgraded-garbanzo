@@ -359,7 +359,7 @@ class TestContextFileTools:
             from unittest.mock import patch
 
             fake_path = Path(tmpdir) / "nonexistent"
-            with patch("agent.tools._CONTEXT_DIR", fake_path):
+            with patch("agent.tools.get_context_dir", return_value=fake_path):
                 result = list_context_files(mock_tool_context)
 
                 assert result["status"] == "success"
@@ -376,7 +376,7 @@ class TestContextFileTools:
             context_dir = Path(tmpdir)
             from unittest.mock import patch
 
-            with patch("agent.tools._CONTEXT_DIR", context_dir):
+            with patch("agent.tools.get_context_dir", return_value=context_dir):
                 # Write a file
                 write_result = write_context_file(
                     mock_tool_context, "TEST.md", "# Test Content\nHello World"
@@ -410,7 +410,7 @@ class TestContextFileTools:
             (context_dir / "VISIBLE.md").write_text("visible")
             (context_dir / ".hidden").write_text("hidden")
 
-            with patch("agent.tools._CONTEXT_DIR", context_dir):
+            with patch("agent.tools.get_context_dir", return_value=context_dir):
                 result = list_context_files(mock_tool_context)
 
                 assert result["status"] == "success"

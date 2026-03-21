@@ -6,12 +6,10 @@ from pathlib import Path
 
 from google.adk.agents.readonly_context import ReadonlyContext
 
+from .utils import config as _agent_config
 from .utils.app_timezone import get_app_timezone
 
 logger = logging.getLogger(__name__)
-
-# Default context directory (relative to this file's parent's parent = project root)
-DEFAULT_CONTEXT_DIR = Path(__file__).parent.parent.parent / ".context"
 
 
 def _load_context_file(filename: str, context_dir: Path | None = None) -> str:
@@ -20,12 +18,12 @@ def _load_context_file(filename: str, context_dir: Path | None = None) -> str:
     Args:
         filename: Name of the context file (e.g., "IDENTITY.md").
         context_dir: Directory containing context files.
-            Defaults to .context/ in project root.
+            Defaults to :func:`agent.utils.config.get_context_dir`.
 
     Returns:
         The file content, or empty string if file doesn't exist.
     """
-    dir_path = context_dir or DEFAULT_CONTEXT_DIR
+    dir_path = context_dir or _agent_config.get_context_dir()
     file_path = dir_path / filename
 
     if not file_path.exists():
@@ -46,7 +44,7 @@ def load_context(context_dir: Path | None = None) -> str:
 
     Args:
         context_dir: Directory containing context files.
-            Defaults to .context/ in project root.
+            Defaults to :func:`agent.utils.config.get_context_dir`.
 
     Returns:
         Combined context string with all loaded files, or empty string if none found.

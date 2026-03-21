@@ -5,11 +5,18 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 """
 
 from .bot import create_application, main, run_bot
-from .handler import TelegramHandler, initialize_runner, process_message, reset_session
+from .handler import (
+    TelegramAgentReply,
+    TelegramHandler,
+    initialize_runner,
+    process_message,
+    reset_session,
+)
 from .markdown_converter import convert_markdown_to_telegram
 from .notifications import ToolNotificationService, get_notification_service
 
 __all__ = [
+    "TelegramAgentReply",
     "TelegramHandler",
     "ToolNotificationService",
     "convert_markdown_to_telegram",

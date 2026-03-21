@@ -1,6 +1,12 @@
 """Utility modules."""
 
-from .config import ServerEnv, SessionConfig, get_data_dir, initialize_environment
+from .config import (
+    ServerEnv,
+    SessionConfig,
+    get_context_dir,
+    get_data_dir,
+    initialize_environment,
+)
 from .observability import configure_otel_resource, setup_logging
 from .session import create_session_service_for_runner
 
@@ -9,6 +15,7 @@ __all__ = [
     "SessionConfig",
     "configure_otel_resource",
     "create_session_service_for_runner",
+    "get_context_dir",
     "get_data_dir",
     "initialize_environment",
     "setup_logging",

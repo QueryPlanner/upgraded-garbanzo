@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC, datetime
+from typing import NoReturn
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -77,7 +78,7 @@ class TestTelegramHandler:
         with patch.object(handler.runner, "run_async", mock_run_async):
             response = await handler.process_message("user-1", "Hello")
 
-        assert response == "Hello!"
+        assert response.text == "Hello!"
 
     @pytest.mark.asyncio
     async def test_process_message_logs_pre_llm_latency_when_enabled(
@@ -103,6 +104,34 @@ class TestTelegramHandler:
         messages = [record.message for record in caplog.records]
         assert any("telegram.pre_llm_latency" in m for m in messages)
         assert any("telegram.adk_first_stream_event" in m for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_process_message_discards_pending_files_when_run_async_fails(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """On stream failure, end batch and discard staged uploads before re-raise."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        class _StreamFails:
+            def __aiter__(self) -> "_StreamFails":
+                return self
+
+            async def __anext__(self) -> NoReturn:
+                raise RuntimeError("stream failed")
+
+        def mock_run_async(**kwargs: object) -> _StreamFails:
+            return _StreamFails()
+
+        with (
+            patch.object(handler.runner, "run_async", mock_run_async),
+            patch(
+                "agent.telegram.handler.discard_telegram_staging_files",
+            ) as mock_discard,
+            pytest.raises(RuntimeError, match="stream failed"),
+        ):
+            await handler.process_message("user-1", "Hello")
+
+        mock_discard.assert_called_once_with([])
 
     @pytest.mark.asyncio
     async def test_process_message_uses_existing_session(
@@ -132,7 +161,7 @@ class TestTelegramHandler:
                     "user-1", "Hello", session_id="existing-session"
                 )
 
-            assert response == "Response"
+            assert response.text == "Response"
             mock_get.assert_called_once()
 
     @pytest.mark.asyncio
@@ -174,7 +203,7 @@ class TestTelegramHandler:
             with patch.object(handler.runner, "run_async", mock_run_async):
                 response = await handler.process_message("user-1", "Hello")
 
-            assert response == "Response"
+            assert response.text == "Response"
             mock_get.assert_called_once()
             mock_delete.assert_called_once_with(
                 app_name="test-app",
@@ -206,7 +235,7 @@ class TestTelegramHandler:
         with patch.object(handler.runner, "run_async", mock_run_async):
             response = await handler.process_message("user-1", "Hello")
 
-        assert response == "Part 1 Part 2"
+        assert response.text == "Part 1 Part 2"
 
     @pytest.mark.asyncio
     async def test_process_message_uses_user_id_as_session_id(
@@ -249,7 +278,7 @@ class TestTelegramHandler:
         with patch.object(handler.runner, "run_async", mock_run_async):
             response = await handler.process_message("user-1", "Hello")
 
-        assert response == "Response"
+        assert response.text == "Response"
 
     @pytest.mark.asyncio
     async def test_process_message_handles_event_without_parts(
@@ -269,7 +298,7 @@ class TestTelegramHandler:
         with patch.object(handler.runner, "run_async", mock_run_async):
             response = await handler.process_message("user-1", "Hello")
 
-        assert response == "Valid"
+        assert response.text == "Valid"
 
     @pytest.mark.asyncio
     async def test_process_message_handles_part_without_text(
@@ -292,7 +321,7 @@ class TestTelegramHandler:
             response = await handler.process_message("user-1", "Hello")
 
         # Empty string is falsy but still concatenated
-        assert response == "Text"
+        assert response.text == "Text"
 
     @pytest.mark.asyncio
     async def test_process_message_filters_thought_parts(
@@ -319,8 +348,8 @@ class TestTelegramHandler:
             response = await handler.process_message("user-1", "Hello")
 
         # Only the non-thought part should be in the response
-        assert response == "Hello! How can I help?"
-        assert "internal reasoning" not in response
+        assert response.text == "Hello! How can I help?"
+        assert "internal reasoning" not in response.text
 
     @pytest.mark.asyncio
     async def test_process_message_handles_part_without_thought_attribute(
@@ -338,7 +367,7 @@ class TestTelegramHandler:
         with patch.object(handler.runner, "run_async", mock_run_async):
             response = await handler.process_message("user-1", "Hello")
 
-        assert response == "Response"
+        assert response.text == "Response"
 
     @pytest.mark.asyncio
     async def test_reset_session_deletes_and_creates_new(
@@ -498,7 +527,7 @@ class TestProcessMessageFunction:
         with patch.object(handler._handler.runner, "run_async", mock_run_async):
             response = await process_message("user-1", "Hello")
 
-        assert response == "Response"
+        assert response.text == "Response"
 
 
 class TestResetSessionFunction:
@@ -558,7 +587,7 @@ class TestProcessReminder:
                 scheduled_time=datetime(2026, 3, 19, 12, 0, tzinfo=UTC),
             )
 
-        assert "lunch" in response or "Hey!" in response
+        assert "lunch" in response.text or "Hey!" in response.text
 
     @pytest.mark.asyncio
     async def test_formats_reminder_prompt_correctly(
