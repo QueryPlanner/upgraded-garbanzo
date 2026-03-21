@@ -79,15 +79,21 @@ class TestAgentIntegration:
             assert len(typed_agent.model.model) > 0
 
     def test_agent_instructions_are_valid_if_configured(self) -> None:
-        """Verify agent instructions (if configured) are valid strings."""
+        """Verify agent instructions (if configured) are valid strings or providers."""
         agent = app.root_agent
         assert agent is not None
         typed_agent = as_agent_config(agent)
 
-        # Instruction is optional - if configured, should be non-empty string
+        # Instruction is optional - if configured, should be a non-empty string
+        # or a provider that returns one.
         if typed_agent.instruction is not None:
-            assert isinstance(typed_agent.instruction, str)
-            assert len(typed_agent.instruction) > 0
+            if callable(typed_agent.instruction):
+                instruction = typed_agent.instruction()
+                assert isinstance(instruction, str)
+                assert len(instruction) > 0
+            else:
+                assert isinstance(typed_agent.instruction, str)
+                assert len(typed_agent.instruction) > 0
 
         # Description is optional - if configured, should be non-empty string
         if typed_agent.description is not None:

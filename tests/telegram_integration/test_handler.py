@@ -11,6 +11,7 @@ from google.genai import types
 
 from agent.telegram.handler import (
     REMINDER_PROMPT_TEMPLATE,
+    REMINDER_SESSION_SUFFIX,
     TelegramHandler,
     get_handler,
     initialize_runner,
@@ -616,7 +617,8 @@ class TestProcessReminder:
                 scheduled_time=datetime.now(UTC),
             )
 
-        assert captured_session_id == "user-42"
+        # Reminder sessions use a dedicated session with suffix
+        assert captured_session_id == f"user-42{REMINDER_SESSION_SUFFIX}"
 
     @pytest.mark.asyncio
     async def test_uses_custom_session_id_when_provided(
