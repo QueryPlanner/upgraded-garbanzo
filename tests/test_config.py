@@ -465,3 +465,17 @@ class TestGetDataDir:
         resolved = get_data_dir()
 
         assert resolved == (app_src / "agent" / "data").resolve()
+
+    def test_default_data_dir_is_used_as_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When no env vars are set, DEFAULT_DATA_DIR is used."""
+        monkeypatch.delenv("AGENT_DATA_DIR", raising=False)
+        monkeypatch.delenv("AGENT_DIR", raising=False)
+        mock_default_dir = tmp_path / "default_data"
+        monkeypatch.setattr("agent.utils.config.DEFAULT_DATA_DIR", mock_default_dir)
+
+        resolved = get_data_dir()
+
+        assert resolved == mock_default_dir.resolve()
+        assert resolved.is_dir()
