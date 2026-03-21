@@ -34,19 +34,25 @@ def get_data_dir() -> Path:
 
     Resolves the data directory in the following order:
     1. AGENT_DATA_DIR environment variable (if set)
-    2. Default to src/agent/data within the project
+    2. If AGENT_DIR is set (Dockerfile sets this to /app/src): ``AGENT_DIR/agent/data``
+       so SQLite uses the volume at ``/app/src/agent/data`` instead of
+       ``site-packages/agent/data`` when the package is installed into .venv.
+    3. Default: ``agent/data`` next to this package (editable / source checkout)
 
     Also handles migration from legacy ~/.adk_agent/ directory on first run.
 
     Returns:
         Path to the data directory (guaranteed to exist).
     """
-    # Check for environment variable override
     env_dir = os.getenv("AGENT_DATA_DIR")
-    if env_dir:
+    if env_dir and env_dir.strip():
         data_dir = Path(env_dir).expanduser().resolve()
     else:
-        data_dir = DEFAULT_DATA_DIR.resolve()
+        agent_src_root = os.getenv("AGENT_DIR")
+        if agent_src_root and agent_src_root.strip():
+            data_dir = Path(agent_src_root).expanduser().resolve() / "agent" / "data"
+        else:
+            data_dir = DEFAULT_DATA_DIR.resolve()
 
     # Create directory if it doesn't exist
     data_dir.mkdir(parents=True, exist_ok=True)

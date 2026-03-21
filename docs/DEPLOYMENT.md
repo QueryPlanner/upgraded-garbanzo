@@ -70,6 +70,36 @@ Then your update command becomes:
 docker compose pull && docker compose up -d
 ```
 
+### Server without a git clone (image only)
+
+The application runs **inside the image**; you do **not** need Python source on the VM. You still need a tiny directory with:
+
+1. **`compose.image.yaml`** — copy from this repo (or download the same file from GitHub raw), and  
+2. **`.env`** — secrets and config (same variables as in CI: `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY` or `GOOGLE_API_KEY`, etc.).
+
+Set the image explicitly in `.env`:
+
+```bash
+IMAGE=ghcr.io/<your-org>/<your-repo>:main
+```
+
+Deploy or update:
+
+```bash
+docker compose -f compose.image.yaml pull
+docker compose -f compose.image.yaml up -d
+```
+
+**Logs** do not require Compose or the repo — use the container name from `docker ps`:
+
+```bash
+docker logs -f --timestamps <container_name>
+```
+
+Example: `docker logs -f --timestamps upgraded-garbanzo-telegram-bot-1`.
+
+If you use the default `compose.yaml` on a host that has **no** `Dockerfile`, Compose may try to build and fail; use **`compose.image.yaml`** on those hosts instead.
+
 ---
 
 ## Option 1: Docker (Recommended for Ease)
@@ -143,6 +173,22 @@ cp .env.example .env
 sudo systemctl status agent
 sudo journalctl -u agent -f
 ```
+
+## SQLite persistence (reminders, fitness)
+
+Local SQLite files live under the container path `/app/src/agent/data`, backed by the Compose named volume `agent_data`. That survives `docker compose pull` and `docker compose up -d`.
+
+**If data disappears after each deploy**, the usual cause is a **changing Compose project name**: Docker names volumes `{project}_agent_data`, and the project name defaults to the directory that holds `compose.yaml`. A different clone path or CI workspace layout then mounts a **new empty** volume.
+
+This repo pins the project name (`name: adk-agent` in `compose.yaml`, and `COMPOSE_PROJECT_NAME=adk-agent` in the deploy workflow `.env`) so the same volumes are reused every time.
+
+**On the VM you should:**
+
+1. Deploy with `docker compose` from this repo’s `compose.yaml` (not a bare `docker run` without `-v` mounts — that uses the container filesystem and loses data on every new container).
+2. Avoid `docker compose down -v` and any prune that removes volumes (for example `docker system prune --volumes`).
+3. Optional hardening: bind-mount a fixed host directory instead of a named volume, for example create `/var/lib/adk-agent/data`, `chown` it to UID/GID `1000` (the image’s `app` user), and replace the `agent_data` volume line with `- /var/lib/adk-agent/data:/app/src/agent/data`.
+
+If you already have data in an older volume (from a previous folder name), list volumes with `docker volume ls`, identify the old `*_agent_data` volume, and copy its files into the new volume or bind mount once.
 
 ## Troubleshooting
 
