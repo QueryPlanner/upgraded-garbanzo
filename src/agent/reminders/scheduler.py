@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
+from telegram import InputFile
 
 from ..utils.app_timezone import get_app_timezone, now_utc, utc_iso_seconds
 from .recurrence import get_next_trigger_time
@@ -174,7 +175,7 @@ class ReminderScheduler:
                     f"Processing reminder {reminder.id} through agent for "
                     f"user {reminder.user_id}"
                 )
-                response = await self._handler.process_reminder(
+                reply = await self._handler.process_reminder(
                     user_id=reminder.user_id,
                     reminder_message=reminder.message,
                     scheduled_time=scheduled_time,
@@ -183,9 +184,29 @@ class ReminderScheduler:
                 # Send the agent's response via Telegram
                 await self.bot.send_message(
                     chat_id=reminder.user_id,
-                    text=response,
+                    text=reply.text,
                     parse_mode="Markdown",
                 )
+
+                caption_limit = 1024
+                for doc in reply.documents:
+                    try:
+                        cap = doc.caption
+                        if cap is not None and len(cap) > caption_limit:
+                            cap = cap[: caption_limit - 1] + "…"
+                        # PTB: str is file *content*, not a path — read bytes from disk.
+                        with doc.path.open("rb") as upload_fh:
+                            document = InputFile(
+                                upload_fh,
+                                filename=doc.filename or doc.path.name,
+                            )
+                        await self.bot.send_document(
+                            chat_id=reminder.user_id,
+                            document=document,
+                            caption=cap,
+                        )
+                    finally:
+                        doc.path.unlink(missing_ok=True)
             else:
                 # Fallback to simple hardcoded message
                 await self.bot.send_message(

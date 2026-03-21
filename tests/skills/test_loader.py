@@ -13,6 +13,7 @@ from agent.skills.loader import (
     create_skill_toolset,
     get_available_skills,
     parse_skill_file,
+    resolve_skills_dir,
 )
 
 
@@ -176,3 +177,25 @@ class TestDefaultSkillsDir:
         # The default should be at project root/skills
         assert DEFAULT_SKILLS_DIR.name == "skills"
         assert DEFAULT_SKILLS_DIR.is_absolute()
+
+
+class TestResolveSkillsDir:
+    """Tests for AGENT_SKILLS_DIR resolution."""
+
+    def test_env_override(
+        self, temp_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_SKILLS_DIR", str(temp_skills_dir))
+        assert resolve_skills_dir() == temp_skills_dir.resolve()
+
+    def test_whitespace_env_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AGENT_SKILLS_DIR", "   \t  ")
+        assert resolve_skills_dir() == DEFAULT_SKILLS_DIR
+
+    def test_get_available_skills_uses_env_when_no_arg(
+        self, temp_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_SKILLS_DIR", str(temp_skills_dir))
+        skills = get_available_skills()
+        assert len(skills) == 1
+        assert skills[0].frontmatter.name == "test-skill"

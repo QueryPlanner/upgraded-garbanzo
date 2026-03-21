@@ -63,6 +63,37 @@ def get_data_dir() -> Path:
     return data_dir
 
 
+def get_context_dir() -> Path:
+    """Directory for ``.context`` files (USER.md, skills notes, etc.).
+
+    Resolution order (aligned with :func:`get_data_dir`):
+
+    1. ``AGENT_CONTEXT_DIR`` if set — explicit override.
+    2. If ``AGENT_DIR`` is set (Dockerfile uses ``/app/src``): ``AGENT_DIR/.context``
+       so runtime matches the image layout and Compose volume, not
+       ``site-packages/.../.context`` from a non-editable install.
+    3. Otherwise: repository root ``.context`` (this file is
+       ``src/agent/utils/config.py`` → four parents up).
+
+    Creates the directory if missing.
+
+    Returns:
+        Absolute path to the context directory.
+    """
+    env_dir = os.getenv("AGENT_CONTEXT_DIR")
+    if env_dir and env_dir.strip():
+        ctx = Path(env_dir).expanduser().resolve()
+    else:
+        agent_src_root = os.getenv("AGENT_DIR")
+        if agent_src_root and agent_src_root.strip():
+            ctx = Path(agent_src_root).expanduser().resolve() / ".context"
+        else:
+            # .../src/agent/utils/config.py → repo root
+            ctx = Path(__file__).resolve().parent.parent.parent.parent / ".context"
+    ctx.mkdir(parents=True, exist_ok=True)
+    return ctx
+
+
 def _migrate_from_legacy(data_dir: Path) -> None:
     """Migrate data from legacy ~/.adk_agent/ to new data directory.
 

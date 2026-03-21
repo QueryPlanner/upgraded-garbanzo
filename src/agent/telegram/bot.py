@@ -23,7 +23,7 @@ import re
 import sys
 
 from dotenv import load_dotenv
-from telegram import BotCommand, Update
+from telegram import Bot, BotCommand, InputFile, Update
 from telegram._message import Message
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, TelegramError, TimedOut
@@ -43,6 +43,7 @@ load_dotenv()
 from ..agent import app  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
 from ..utils.session import create_session_service_for_runner  # noqa: E402
+from ..utils.telegram_outbox import PendingTelegramFile  # noqa: E402
 from .handler import (  # noqa: E402
     get_handler,
     initialize_runner,
@@ -61,6 +62,7 @@ logger = logging.getLogger(__name__)
 # Bot configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_MESSAGE_LENGTH = 4096  # Telegram's message limit
+TELEGRAM_DOCUMENT_CAPTION_MAX = 1024
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -167,6 +169,39 @@ async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+async def _send_queued_telegram_documents(
+    bot: Bot,
+    chat_id: int,
+    documents: tuple[PendingTelegramFile, ...],
+) -> None:
+    """Send files queued by agent tools; remove staging files after each attempt."""
+    for doc in documents:
+        try:
+            caption = doc.caption
+            if caption is not None and len(caption) > TELEGRAM_DOCUMENT_CAPTION_MAX:
+                caption = caption[: TELEGRAM_DOCUMENT_CAPTION_MAX - 1] + "…"
+            # PTB: str is treated as *file body* (UTF-8), not a path — open the file.
+            with doc.path.open("rb") as upload_fh:
+                document = InputFile(
+                    upload_fh,
+                    filename=doc.filename or doc.path.name,
+                )
+            await bot.send_document(
+                chat_id=chat_id,
+                document=document,
+                caption=caption,
+            )
+        except TelegramError:
+            logger.warning(
+                "Failed to send Telegram document to chat_id=%s path=%s",
+                chat_id,
+                doc.path,
+                exc_info=True,
+            )
+        finally:
+            doc.path.unlink(missing_ok=True)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming text messages and forward to the ADK agent."""
     if not update.message or not update.message.text:
@@ -199,31 +234,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         # Process message through ADK agent
-        response = await process_message(
+        reply = await process_message(
             user_id=user_id,
             message=user_message,
         )
 
-        # Handle empty responses
-        if not response or not response.strip():
+        response_text = reply.text
+        has_text = bool(response_text and response_text.strip())
+        if not has_text and not reply.documents:
             logger.warning(f"Agent returned empty response for user {user_id}")
             await update.message.reply_text(
                 "🤔 I'm not sure how to respond to that. Could you rephrase?"
             )
             return
 
-        telegram_response = _render_markdown_as_html(response)
+        if has_text:
+            telegram_response = _render_markdown_as_html(response_text)
 
-        # Split long messages if needed (Telegram has 4096 char limit)
-        if len(telegram_response) <= MAX_MESSAGE_LENGTH:
-            await _send_validated_chunk(
-                message=update.message,
-                chunk=telegram_response,
-                fallback_text=response,
-            )
-        else:
-            # Split into chunks at natural boundaries when possible
-            await _send_long_message(update.message, telegram_response)
+            # Split long messages if needed (Telegram has 4096 char limit)
+            if len(telegram_response) <= MAX_MESSAGE_LENGTH:
+                await _send_validated_chunk(
+                    message=update.message,
+                    chunk=telegram_response,
+                    fallback_text=response_text,
+                )
+            else:
+                # Split into chunks at natural boundaries when possible
+                await _send_long_message(update.message, telegram_response)
+
+        await _send_queued_telegram_documents(
+            bot=context.bot,
+            chat_id=chat_id,
+            documents=reply.documents,
+        )
 
     except TelegramError as e:
         logger.error(f"Telegram API error for user {user_id}: {e}")

@@ -38,9 +38,20 @@ FROM python:3.13-slim AS runtime
 
 # Install system dependencies
 # - netcat-openbsd: for checking DB readiness (used in entrypoint.sh)
+# - nodejs/npm: global agent-browser CLI
+# - chromium: browser for agent-browser (Chrome-for-Testing install has no linux-arm64)
+# - curl, ca-certificates: HTTPS for npm and browser downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
+    ca-certificates \
+    curl \
+    chromium \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
+
+# agent-browser CLI (uses AGENT_BROWSER_EXECUTABLE_PATH + distro Chromium)
+RUN npm install -g agent-browser
 
 # Create non-root user for security (matching common host UID 1000)
 RUN groupadd -g 1000 app && \
@@ -61,6 +72,13 @@ RUN mkdir -p /app/src/.adk/artifacts \
 # Copy application and virtual environment from builder
 COPY --from=builder --chown=app:app /app .
 
+# Playwright: OS deps as root, browsers under a shared path for the app user
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/pw-browsers
+RUN mkdir -p /app/pw-browsers \
+    && chown app:app /app/pw-browsers \
+    && /app/.venv/bin/playwright install-deps chromium \
+    && su -s /bin/sh app -c "/app/.venv/bin/playwright install chromium"
+
 # Copy entrypoint script and set ownership/permissions
 COPY --chown=app:app entrypoint.sh .
 RUN chmod +x entrypoint.sh
@@ -68,13 +86,18 @@ RUN chmod +x entrypoint.sh
 # Copy context files (IDENTITY.md, SOUL.md - USER.md is user-specific)
 COPY --chown=app:app .context/*.md /app/src/.context/
 
+# Skill markdown (lazy-loaded via SkillToolset); non-editable installs need this path
+COPY --chown=app:app skills /app/skills
+
 # Set environment to use virtual environment
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     AGENT_DIR=/app/src \
+    AGENT_SKILLS_DIR=/app/skills \
     HOST=0.0.0.0 \
-    PORT=8080
+    PORT=8080 \
+    AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Switch to non-root user
 USER app

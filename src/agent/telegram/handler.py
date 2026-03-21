@@ -7,6 +7,7 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 import logging
 import os
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -19,11 +20,25 @@ from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai import types
 
 from ..utils.app_timezone import format_stored_instant_for_display
+from ..utils.telegram_outbox import (
+    PendingTelegramFile,
+    begin_telegram_file_batch,
+    discard_telegram_staging_files,
+    end_telegram_file_batch,
+)
 
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TelegramAgentReply:
+    """Text response from the agent plus files queued for Telegram."""
+
+    text: str
+    documents: tuple[PendingTelegramFile, ...] = field(default_factory=tuple)
 
 
 def _telegram_latency_log_enabled() -> bool:
@@ -144,7 +159,7 @@ class TelegramHandler:
         user_id: str,
         message: str,
         session_id: str | None = None,
-    ) -> str:
+    ) -> TelegramAgentReply:
         """Process a message through the ADK agent.
 
         Args:
@@ -154,7 +169,7 @@ class TelegramHandler:
                 If not provided, user_id is used as session_id.
 
         Returns:
-            The agent's response text.
+            Reply text and any files tools queued for Telegram delivery.
         """
         latency_log = _telegram_latency_log_enabled()
         pipeline_start = time.perf_counter()
@@ -222,36 +237,37 @@ class TelegramHandler:
 
         run_started = time.perf_counter()
         first_stream_event_logged = False
-        async for event in self.runner.run_async(
-            user_id=user_id,
-            session_id=effective_session_id,
-            new_message=content,
-        ):
-            if latency_log and not first_stream_event_logged:
-                first_stream_event_logged = True
-                first_event = time.perf_counter()
-                ms_after_run = (first_event - run_started) * 1000
-                logger.info(
-                    "telegram.adk_first_stream_event user_id=%s "
-                    "ms_after_run_async_started=%.1f "
-                    "(often includes LLM; first yield may be late)",
-                    user_id,
-                    ms_after_run,
-                )
+        begin_telegram_file_batch()
+        try:
+            async for event in self.runner.run_async(
+                user_id=user_id,
+                session_id=effective_session_id,
+                new_message=content,
+            ):
+                if latency_log and not first_stream_event_logged:
+                    first_stream_event_logged = True
+                    first_event = time.perf_counter()
+                    ms_after_run = (first_event - run_started) * 1000
+                    logger.info(
+                        "telegram.adk_first_stream_event user_id=%s "
+                        "ms_after_run_async_started=%.1f "
+                        "(often includes LLM; first yield may be late)",
+                        user_id,
+                        ms_after_run,
+                    )
 
-            # Extract text from model responses, filtering out thought parts
-            # Thought parts contain internal reasoning and should not be shown to users
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    # Skip thought parts (internal model reasoning)
-                    # Note: The 'thought' attribute is used by Google's ADK to mark
-                    # internal reasoning parts. This approach relies on the internal
-                    # structure of google.genai.types.Part. If the library changes,
-                    # this logic may need to be updated.
-                    if hasattr(part, "thought") and part.thought:
-                        continue
-                    if part.text:
-                        response_parts.append(part.text)
+                # Extract text from model responses, filtering out thought parts
+                # Thought parts contain internal reasoning and should not be shown
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, "thought") and part.thought:
+                            continue
+                        if part.text:
+                            response_parts.append(part.text)
+        except Exception:
+            pending_on_error = end_telegram_file_batch()
+            discard_telegram_staging_files(pending_on_error)
+            raise
 
         if latency_log and not first_stream_event_logged:
             logger.info(
@@ -260,7 +276,11 @@ class TelegramHandler:
                 user_id,
             )
 
-        return "".join(response_parts)
+        pending_files = end_telegram_file_batch()
+        return TelegramAgentReply(
+            text="".join(response_parts),
+            documents=tuple(pending_files),
+        )
 
     async def reset_session(self, user_id: str, session_id: str | None = None) -> bool:
         """Reset a user's session by deleting and creating a fresh one.
@@ -323,7 +343,7 @@ class TelegramHandler:
         reminder_message: str,
         scheduled_time: datetime,
         session_id: str | None = None,
-    ) -> str:
+    ) -> TelegramAgentReply:
         """Process a reminder through the ADK agent for personalized response.
 
         This method injects a reminder as a simulated user message, allowing
@@ -339,7 +359,7 @@ class TelegramHandler:
                 session so it does not inherit the user's scheduling chat.
 
         Returns:
-            The agent's personalized response to the reminder.
+            The agent's personalized reply and any queued file attachments.
         """
         if scheduled_time.tzinfo is None:
             scheduled_time = scheduled_time.replace(tzinfo=UTC)
@@ -421,7 +441,7 @@ async def process_message(
     user_id: str,
     message: str,
     session_id: str | None = None,
-) -> str:
+) -> TelegramAgentReply:
     """Process a message through the ADK agent.
 
     This function is maintained for backwards compatibility.
@@ -434,7 +454,7 @@ async def process_message(
             If not provided, user_id is used as session_id.
 
     Returns:
-        The agent's response text.
+        The agent's response text and optional Telegram document queue.
 
     Raises:
         RuntimeError: If the handler hasn't been initialized.

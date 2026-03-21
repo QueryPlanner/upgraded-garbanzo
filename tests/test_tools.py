@@ -1,6 +1,7 @@
 """Unit tests for custom tools."""
 
 import logging
+import os
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,12 +15,25 @@ from conftest import MockState, MockToolContext
 
 from agent.reminders import Reminder, ReminderScheduler, ReminderStorage
 from agent.tools import (
+    _agent_runs_inside_docker,
+    _existing_file_if_text_body_is_path_string,
     _parse_reminder_datetime,
+    _resolve_agent_data_or_host_path,
+    _truncate_output,
+    _validate_agent_data_relative_path,
+    _validate_single_download_filename,
     cancel_reminder,
+    docker_bash_execute,
     example_tool,
     get_current_datetime,
     list_reminders,
     schedule_reminder,
+    send_telegram_file,
+)
+from agent.utils.telegram_outbox import (
+    TelegramFileOutboxError,
+    begin_telegram_file_batch,
+    end_telegram_file_batch,
 )
 
 
@@ -688,3 +702,503 @@ class TestParseReminderDatetimeTimezone:
         assert result.tzinfo is not None
         # Result is converted to UTC
         assert str(result.tzinfo) == "UTC"
+
+
+class TestDockerBashExecute:
+    """Tests for docker_bash_execute (Docker-gated shell tool)."""
+
+    def test_agent_runs_inside_docker_is_deterministic_bool(self) -> None:
+        """Exercise /.dockerenv check (real filesystem; no patch)."""
+        assert _agent_runs_inside_docker() in (True, False)
+
+    def test_truncate_output_marks_truncation(self) -> None:
+        data = b"x" * 100
+        text, truncated = _truncate_output(data, max_bytes=50)
+        assert truncated is True
+        assert "truncated" in text
+
+    @pytest.mark.asyncio
+    async def test_disabled_when_not_in_docker(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=False):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo hi",
+            )
+        assert result["status"] == "error"
+        assert "outside Docker" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_command(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "   ",
+            )
+        assert result["status"] == "error"
+        assert "non-empty" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_command(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "x" * 13_000,
+            )
+        assert result["status"] == "error"
+        assert "maximum length" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_runs_echo(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo hello",
+            )
+        assert result["status"] == "success"
+        assert result["exit_code"] == 0
+        assert "hello" in result["stdout"]
+        assert result["output_truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_large_stdout_truncated(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "python3 -c \"print('x' * 200000)\"",
+            )
+        assert result["status"] == "success"
+        assert result["output_truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_timeout_seconds_clamped_low(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo ok",
+                timeout_seconds=0,
+            )
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_timeout_seconds_clamped_high(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo ok",
+                timeout_seconds=9_999,
+            )
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_subprocess_start_oserror(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with (
+            patch("agent.tools._agent_runs_inside_docker", return_value=True),
+            patch(
+                "agent.tools.asyncio.create_subprocess_exec",
+                side_effect=OSError("no bash"),
+            ),
+        ):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo hi",
+            )
+        assert result["status"] == "error"
+        assert "Failed to start bash" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_times_out(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "sleep 5",
+                timeout_seconds=1,
+            )
+        assert result["status"] == "error"
+        assert result.get("timed_out") is True
+        assert "timeout" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_nonzero_exit_still_returns_output(self) -> None:
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "echo out >&1; echo err >&2; exit 7",
+            )
+        assert result["status"] == "success"
+        assert result["exit_code"] == 7
+        assert "out" in result["stdout"]
+        assert "err" in result["stderr"]
+
+
+class TestSendTelegramFile:
+    """Tests for send_telegram_file tool."""
+
+    def test_requires_user_id(self) -> None:
+        begin_telegram_file_batch()
+        try:
+            tool_context = MockToolContext(state=MockState({}))
+            result = send_telegram_file(
+                tool_context,  # type: ignore[arg-type]
+                text_file_body="a",
+                text_file_name="f.txt",
+            )
+            assert result["status"] == "error"
+            assert "user_id" in result["message"]
+        finally:
+            end_telegram_file_batch()
+
+    def test_requires_active_telegram_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body="a",
+            text_file_name="f.txt",
+        )
+        assert result["status"] == "error"
+        assert "Telegram" in result["message"]
+
+    def test_rejects_multiple_sources(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        try:
+            tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+            result = send_telegram_file(
+                tool_context,  # type: ignore[arg-type]
+                context_filename="A.md",
+                text_file_body="x",
+                text_file_name="b.txt",
+            )
+            assert result["status"] == "error"
+            assert "exactly one" in result["message"]
+        finally:
+            discard = end_telegram_file_batch()
+            for p in discard:
+                p.path.unlink(missing_ok=True)
+
+    def test_inline_text_staged_and_registered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body="hello world",
+            text_file_name="note.txt",
+            caption="see file",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert len(pending) == 1
+        assert pending[0].caption == "see file"
+        assert pending[0].path.read_text(encoding="utf-8") == "hello world"
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_text_body_absolute_path_sends_file_not_path_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the model puts a file path in text_file_body, send that file's bytes."""
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        script = tmp_path / "real.py"
+        script.write_text("print('hello')\n", encoding="utf-8")
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=str(script.resolve()),
+            text_file_name="agent.py",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert len(pending) == 1
+        assert pending[0].path.read_text(encoding="utf-8") == "print('hello')\n"
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_text_body_nonexistent_absolute_path_is_literal_content(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ghost = tmp_path / "does_not_exist_xyz.bin"
+        path_str = str(ghost.resolve())
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=path_str,
+            text_file_name="out.txt",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert pending[0].path.read_text(encoding="utf-8") == path_str
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_text_body_multiline_never_treated_as_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "x.py"
+        script.write_text("x", encoding="utf-8")
+        body = f"{script.resolve()}\nline2"
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=body,
+            text_file_name="t.txt",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert pending[0].path.read_text(encoding="utf-8") == body
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_context_file_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        ctx_dir = tmp_path / "ctx"
+        ctx_dir.mkdir()
+        monkeypatch.setattr("agent.tools.get_context_dir", lambda: ctx_dir)
+        (ctx_dir / "NOTE.md").write_text("ctx body", encoding="utf-8")
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            context_filename="NOTE.md",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert len(pending) == 1
+        assert pending[0].path.read_text(encoding="utf-8") == "ctx body"
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_agent_data_file_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        (tmp_path / "data.csv").write_text("a,b", encoding="utf-8")
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            agent_data_path="data.csv",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert len(pending) == 1
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_agent_data_absolute_path_outside_data_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Absolute agent_data_path may point outside get_data_dir()."""
+        data_root = tmp_path / "agent_data"
+        data_root.mkdir()
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: data_root)
+        outside = tmp_path / "elsewhere" / "pic.png"
+        outside.parent.mkdir(parents=True)
+        outside.write_bytes(b"\x89PNG\r\n\x1a\n")
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            agent_data_path=str(outside.resolve()),
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        assert len(pending) == 1
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_context_file_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        ctx_dir = tmp_path / "ctx"
+        ctx_dir.mkdir()
+        monkeypatch.setattr("agent.tools.get_context_dir", lambda: ctx_dir)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            context_filename="MISSING.md",
+        )
+        assert result["status"] == "error"
+        end_telegram_file_batch()
+
+    def test_invalid_agent_data_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            agent_data_path="../etc/passwd",
+        )
+        assert result["status"] == "error"
+        end_telegram_file_batch()
+
+    def test_text_filename_invalid(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body="x",
+            text_file_name="a/b",
+        )
+        assert result["status"] == "error"
+        end_telegram_file_batch()
+
+    def test_text_body_too_large(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        huge = "x" * (600 * 1024)
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=huge,
+            text_file_name="big.txt",
+        )
+        assert result["status"] == "error"
+        end_telegram_file_batch()
+
+    def test_register_error_unlinks_staged_copy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        ctx_dir = tmp_path / "ctx"
+        ctx_dir.mkdir()
+        monkeypatch.setattr("agent.tools.get_context_dir", lambda: ctx_dir)
+        (ctx_dir / "f.md").write_text("z", encoding="utf-8")
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        with patch(
+            "agent.tools.register_telegram_file_for_send",
+            side_effect=TelegramFileOutboxError("full"),
+        ):
+            result = send_telegram_file(
+                tool_context,  # type: ignore[arg-type]
+                context_filename="f.md",
+            )
+        assert result["status"] == "error"
+        staging = tmp_path / ".telegram_staging"
+        assert not any(staging.glob("*")) if staging.exists() else True
+        end_telegram_file_batch()
+
+    def test_agent_data_file_too_large(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        data_file = tmp_path / "huge.bin"
+        data_file.write_bytes(b"x")
+        os.truncate(data_file, 101 * 1024 * 1024)
+        begin_telegram_file_batch()
+        try:
+            tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+            result = send_telegram_file(
+                tool_context,  # type: ignore[arg-type]
+                agent_data_path="huge.bin",
+            )
+            assert result["status"] == "error"
+            assert "too large" in result["message"].lower()
+        finally:
+            end_telegram_file_batch()
+
+    def test_text_file_body_without_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body="x",
+            text_file_name=None,
+        )
+        assert result["status"] == "error"
+        assert "required" in result["message"].lower()
+        end_telegram_file_batch()
+
+
+class TestTelegramPathValidation:
+    """Direct coverage for path/filename helpers used by send_telegram_file."""
+
+    def test_validate_agent_data_path_empty_string_raises(self) -> None:
+        with pytest.raises(ValueError, match="cannot be empty"):
+            _validate_agent_data_relative_path("")
+
+    def test_resolve_host_path_absolute(self, tmp_path: Path) -> None:
+        host_file = tmp_path / "host.txt"
+        host_file.write_text("z", encoding="utf-8")
+        resolved = _resolve_agent_data_or_host_path(str(host_file.resolve()))
+        assert resolved == host_file.resolve()
+
+    def test_resolve_host_path_relative_under_data(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        nested = tmp_path / "sub" / "b.txt"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("x", encoding="utf-8")
+        resolved = _resolve_agent_data_or_host_path("sub/b.txt")
+        assert resolved == nested.resolve()
+
+    def test_resolve_host_path_whitespace_only_raises(self) -> None:
+        with pytest.raises(ValueError, match="cannot be empty"):
+            _resolve_agent_data_or_host_path("   ")
+
+    def test_path_string_detector_skips_relative_path(self, tmp_path: Path) -> None:
+        rel = tmp_path / "only_relative.txt"
+        rel.write_text("z", encoding="utf-8")
+        assert _existing_file_if_text_body_is_path_string("only_relative.txt") is None
+
+    def test_path_string_detector_skips_multiline(self, tmp_path: Path) -> None:
+        f = tmp_path / "a.txt"
+        f.write_text("z", encoding="utf-8")
+        assert _existing_file_if_text_body_is_path_string(f"{f.resolve()}\nx") is None
+
+    def test_path_string_detector_finds_absolute_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.txt"
+        f.write_text("x", encoding="utf-8")
+        got = _existing_file_if_text_body_is_path_string(f"  {f.resolve()}  ")
+        assert got == f.resolve()
+
+    def test_path_string_detector_too_long(self) -> None:
+        assert _existing_file_if_text_body_is_path_string("x" * 5000) is None
+
+    def test_validate_download_filename_whitespace_raises(self) -> None:
+        with pytest.raises(ValueError, match="cannot be empty"):
+            _validate_single_download_filename("   ")
+
+    def test_validate_download_filename_dot_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid text_file_name"):
+            _validate_single_download_filename(".")

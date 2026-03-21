@@ -36,6 +36,7 @@ from .tools import (  # noqa: E402
     cancel_reminder,
     delete_context_file,
     delete_fitness_entry,
+    docker_bash_execute,
     example_tool,
     get_calorie_stats,
     get_current_datetime,
@@ -48,6 +49,7 @@ from .tools import (  # noqa: E402
     log_workout,
     read_context_file,
     schedule_reminder,
+    send_telegram_file,
     write_context_file,
 )
 
@@ -135,6 +137,10 @@ root_agent = LlmAgent(
         list_context_files,
         # YouTube transcript tool
         get_youtube_transcript,
+        # Docker-only shell (see docker_bash_execute docstring)
+        docker_bash_execute,
+        # Telegram: queue file for send after reply (see send_telegram_file)
+        send_telegram_file,
         # Skills (lazy-loaded toolsets)
         skill_toolset,
     ],

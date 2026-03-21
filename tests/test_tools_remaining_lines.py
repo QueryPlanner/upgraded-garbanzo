@@ -311,7 +311,7 @@ class TestContextFileErrors:
             (ctx / "link.md").symlink_to(secret)
         except OSError:
             pytest.skip("symlinks not supported")
-        with patch("agent.tools._CONTEXT_DIR", ctx):
+        with patch("agent.tools.get_context_dir", return_value=ctx):
             r = read_context_file(
                 MockToolContext(state=MockState({})),  # type: ignore[arg-type]
                 "link.md",
@@ -329,7 +329,7 @@ class TestContextFileErrors:
             raise OSError("io")
 
         with (
-            patch("agent.tools._CONTEXT_DIR", ctx),
+            patch("agent.tools.get_context_dir", return_value=ctx),
             patch.object(Path, "read_text", _bad_read),
         ):
             r = read_context_file(
@@ -346,7 +346,7 @@ class TestContextFileErrors:
             raise OSError("w")
 
         with (
-            patch("agent.tools._CONTEXT_DIR", ctx),
+            patch("agent.tools.get_context_dir", return_value=ctx),
             patch.object(Path, "write_text", _bad_write),
         ):
             r = write_context_file(
@@ -359,7 +359,7 @@ class TestContextFileErrors:
     def test_delete_invalid_filename_returns_error(self, tmp_path: Path) -> None:
         ctx = tmp_path / "delctx-invalid"
         ctx.mkdir()
-        with patch("agent.tools._CONTEXT_DIR", ctx):
+        with patch("agent.tools.get_context_dir", return_value=ctx):
             r = delete_context_file(
                 MockToolContext(state=MockState({})),  # type: ignore[arg-type]
                 "",
@@ -369,7 +369,7 @@ class TestContextFileErrors:
     def test_delete_success_and_missing(self, tmp_path: Path) -> None:
         ctx = tmp_path / "dctx"
         ctx.mkdir()
-        with patch("agent.tools._CONTEXT_DIR", ctx):
+        with patch("agent.tools.get_context_dir", return_value=ctx):
             write_context_file(
                 MockToolContext(state=MockState({})),  # type: ignore[arg-type]
                 "D.md",
@@ -396,7 +396,7 @@ class TestContextFileErrors:
             raise OSError("u")
 
         with (
-            patch("agent.tools._CONTEXT_DIR", ctx),
+            patch("agent.tools.get_context_dir", return_value=ctx),
             patch.object(Path, "unlink", _bad_unlink),
         ):
             r = delete_context_file(
@@ -414,7 +414,7 @@ class TestContextFileErrors:
             raise OSError("list")
 
         with (
-            patch("agent.tools._CONTEXT_DIR", ctx),
+            patch("agent.tools.get_context_dir", return_value=ctx),
             patch.object(Path, "iterdir", _bad_iterdir),
         ):
             r = list_context_files(

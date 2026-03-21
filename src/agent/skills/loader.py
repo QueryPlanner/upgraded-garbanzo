@@ -6,6 +6,7 @@ saving tokens compared to always-included instructions.
 """
 
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -14,8 +15,20 @@ from google.adk.tools.skill_toolset import SkillToolset, models
 
 logger = logging.getLogger(__name__)
 
-# Default skills directory at project root
+# Default skills directory at project root (editable / src checkout layout)
 DEFAULT_SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "skills"
+
+
+def resolve_skills_dir() -> Path:
+    """Directory containing skill subfolders (each with ``SKILL.md``).
+
+    Uses ``AGENT_SKILLS_DIR`` when set (e.g. ``/app/skills`` in Docker); otherwise
+    ``DEFAULT_SKILLS_DIR`` next to the source tree.
+    """
+    override = os.getenv("AGENT_SKILLS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return DEFAULT_SKILLS_DIR
 
 
 class SkillParseError(Exception):
@@ -99,12 +112,12 @@ def get_available_skills(skills_dir: Path | None = None) -> list[models.Skill]:
 
     Args:
         skills_dir: Optional path to skills directory.
-            Defaults to project_root/skills
+            When omitted, uses ``AGENT_SKILLS_DIR`` or project ``skills/``.
 
     Returns:
         List of Skill objects found in the directory.
     """
-    skills_path = skills_dir or DEFAULT_SKILLS_DIR
+    skills_path = skills_dir if skills_dir is not None else resolve_skills_dir()
     skills: list[models.Skill] = []
 
     if not skills_path.exists():

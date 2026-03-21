@@ -31,6 +31,7 @@ from agent.reminders.storage import (
     close_shared_reminder_storage,
 )
 from agent.skills.loader import SkillParseError, get_available_skills, parse_skill_file
+from agent.telegram.handler import TelegramAgentReply
 from agent.utils.config import SessionConfig, get_data_dir
 from agent.utils.pg_app_pool import postgres_dsn_from_environment
 from agent.utils.session import create_session_service_for_runner
@@ -724,7 +725,7 @@ class TestBotExtraBranches:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value="   ",
+            return_value=TelegramAgentReply(text="   "),
         ):
             await handle_message(mock_update, mock_context)
         assert "rephrase" in mock_update.message.reply_text.call_args[0][0].lower()
@@ -740,7 +741,7 @@ class TestBotExtraBranches:
         with patch(
             "agent.telegram.bot.process_message",
             new_callable=AsyncMock,
-            return_value="ok",
+            return_value=TelegramAgentReply(text="ok"),
         ):
             mock_context.bot.send_chat_action = AsyncMock(side_effect=TimedOut("t"))
             await handle_message(mock_update, mock_context)

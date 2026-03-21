@@ -113,9 +113,7 @@ class TestAgentIntegration:
         user_file = context_dir / "USER.md"
         user_file.write_text("first preference", encoding="utf-8")
 
-        import agent.prompt as prompt_module
-
-        monkeypatch.setattr(prompt_module, "DEFAULT_CONTEXT_DIR", context_dir)
+        monkeypatch.setattr("agent.utils.config.get_context_dir", lambda: context_dir)
 
         instruction_provider = as_agent_config(app.root_agent).instruction
         assert callable(instruction_provider)
