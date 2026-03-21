@@ -192,6 +192,19 @@ If you already have data in an older volume (from a previous folder name), list 
 
 ## Troubleshooting
 
+### Telegram: `Conflict: terminated by other getUpdates request`
+
+Only **one** process may long-poll `getUpdates` per bot token. If you see this error after changing the Compose project name or redeploying, an **old** bot container is probably still running alongside the new one (`docker ps` will show two `telegram-bot` containers).
+
+Stop and remove the duplicate (example):
+
+```bash
+docker stop upgraded-garbanzo-telegram-bot-1
+docker rm upgraded-garbanzo-telegram-bot-1
+```
+
+`docker compose down` must be run from the directory that contains **that** stack’s `compose.yaml`; it does not accept a container ID.
+
 ### Permission Errors with Artifacts
 If you encounter `PermissionError: [Errno 13] Permission denied: '/app/src/.adk'` when running with Docker:
 1.  This usually happens because the container user (UID 1000) cannot write to the host volume mounted at `./src`.
