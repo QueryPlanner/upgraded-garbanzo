@@ -25,14 +25,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-REMINDER_SESSION_SUFFIX = ":scheduled-reminder"
-
 
 def _telegram_latency_log_enabled() -> bool:
     """True when TELEGRAM_LATENCY_LOG requests structured pre-LLM timing logs."""
     value = os.environ.get("TELEGRAM_LATENCY_LOG", "").strip().lower()
     return value in ("1", "true", "yes")
 
+
+# Suffix for ADK session IDs used when delivering scheduled reminders so they do not
+# overwrite the user's main chat session.
+REMINDER_SESSION_SUFFIX = "-reminder"
 
 # Template for injecting reminders into the agent's context
 REMINDER_PROMPT_TEMPLATE = """[SCHEDULED REMINDER]

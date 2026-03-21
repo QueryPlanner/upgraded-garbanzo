@@ -1,11 +1,16 @@
 """Unit tests for prompt definition functions."""
 
+import logging
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 from conftest import MockReadonlyContext
 
 from agent.prompt import (
+    _load_context_file,
+    load_context,
     return_description_root,
     return_global_instruction,
     return_instruction_root,
@@ -196,3 +201,26 @@ class TestReturnGlobalInstruction:
 
         datetime_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
         assert re.search(datetime_pattern, instruction1)
+
+
+class TestLoadContextEdgeCases:
+    """Branch coverage for context file loading."""
+
+    def test_load_context_warns_when_no_files(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        assert load_context(tmp_path) == ""
+        assert "No context files loaded" in caplog.text
+
+    def test_load_context_file_read_error_returns_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p = tmp_path / "BOOTSTRAP.md"
+        p.write_text("x", encoding="utf-8")
+
+        def _boom(*_a: object, **_kw: object) -> str:
+            raise OSError("read failed")
+
+        monkeypatch.setattr("agent.prompt.Path.read_text", _boom)
+        assert _load_context_file("BOOTSTRAP.md", tmp_path) == ""

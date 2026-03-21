@@ -1,4 +1,4 @@
-"""Helpers for recurring reminder schedules."""
+"""Helpers for recurring reminder schedules and cron validation."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,7 +12,7 @@ from ..utils.app_timezone import now_utc
 
 @dataclass(frozen=True)
 class RecurringSchedule:
-    """Normalized recurring schedule stored with a reminder."""
+    """Declarative recurring schedule metadata (cron + timezone)."""
 
     cron_expression: str
     description: str
@@ -34,7 +34,8 @@ def get_next_trigger_time(
     timezone_name: str,
     reference_time: datetime | None = None,
 ) -> datetime:
-    """Return the next UTC fire time after the reference instant."""
+    """Return the next UTC fire time strictly after the reference instant."""
+    normalized_expression = validate_cron_expression(cron_expression, timezone_name)
     utc_reference_time = reference_time or now_utc()
     if utc_reference_time.tzinfo is None:
         utc_reference_time = utc_reference_time.replace(tzinfo=UTC)
@@ -43,7 +44,7 @@ def get_next_trigger_time(
     local_reference_time = utc_reference_time.astimezone(timezone)
 
     trigger = CronTrigger.from_crontab(
-        cron_expression,
+        normalized_expression,
         timezone=timezone,
     )
     next_fire_time = cast(
@@ -56,7 +57,7 @@ def get_next_trigger_time(
 
     if next_fire_time is None:
         raise ValueError(
-            f"Recurring schedule has no future fire time: {cron_expression}"
+            f"Recurring schedule has no future fire time: {normalized_expression}"
         )
 
     if next_fire_time.tzinfo is None:
