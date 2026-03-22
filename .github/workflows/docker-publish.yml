@@ -1,4 +1,4 @@
-name: CI and server deploy
+name: CI
 
 on:
   push:
@@ -7,51 +7,6 @@ on:
   pull_request:
     branches: ["main"]
 
-# Local image tags on the self-hosted runner (rollback: docker tag adk-agent:previous
-# adk-agent:current && docker compose up -d).
-env:
-  DEPLOY_IMAGE: adk-agent:current
-  DEPLOY_IMAGE_PREVIOUS: adk-agent:previous
-
 jobs:
   quality:
     uses: ./.github/workflows/code-quality.yml
-
-  deploy:
-    needs: quality
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: self-hosted
-    steps:
-      # clean: false keeps a gitignored .env on the host between runs (same work dir).
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          clean: false
-
-      - name: Enable BuildKit
-        run: |
-          echo "DOCKER_BUILDKIT=1" >> "${GITHUB_ENV}"
-          echo "COMPOSE_DOCKER_CLI_BUILD=1" >> "${GITHUB_ENV}"
-
-      - name: Require host .env (not from GitHub secrets)
-        run: |
-          if [[ ! -f .env ]]; then
-            echo "::error::Missing .env in the runner workspace ($PWD). Create it once on this host"
-            echo "(copy from .env.example). Deploy does not inject repo secrets."
-            exit 1
-          fi
-
-      - name: Retag current image as previous (rollback slot)
-        run: |
-          if docker image inspect "${{ env.DEPLOY_IMAGE }}" >/dev/null 2>&1; then
-            docker tag "${{ env.DEPLOY_IMAGE }}" "${{ env.DEPLOY_IMAGE_PREVIOUS }}"
-            echo "Saved ${{ env.DEPLOY_IMAGE }} -> ${{ env.DEPLOY_IMAGE_PREVIOUS }}"
-          else
-            echo "No existing ${{ env.DEPLOY_IMAGE }} (first deploy)"
-          fi
-
-      - name: Build and deploy on host
-        run: |
-          docker compose -f compose.yaml build
-          docker compose -f compose.yaml up -d
-          docker image prune -f

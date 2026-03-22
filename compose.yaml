@@ -23,7 +23,7 @@ name: adk-agent
 
 services:
   telegram-bot:
-    # CI sets IMAGE; local default matches self-hosted deploy tags.
+    # Set IMAGE in .env for pull-based deploys; default is a local build tag.
     image: ${IMAGE:-adk-agent:current}
     build: .
     environment:
