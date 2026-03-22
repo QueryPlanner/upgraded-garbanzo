@@ -35,6 +35,21 @@ def _coerce_non_negative_int(value: Any) -> int | None:
     return n if n >= 0 else None
 
 
+def _int_from_session_token_counter(previous_raw: Any, key: str) -> int:
+    """Parse cumulative token counter from session state; tolerate corrupt values."""
+    if previous_raw is None:
+        return 0
+    try:
+        return int(previous_raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid non-integer value for session token counter %r: %r",
+            key,
+            previous_raw,
+        )
+        return 0
+
+
 def _llm_usage_token_counts(
     llm_response: LlmResponse,
 ) -> tuple[int | None, int | None, int | None]:
@@ -67,8 +82,7 @@ def _accumulate_telegram_session_tokens(
     def add_to_key(key: str, delta: int | None) -> None:
         if delta is None:
             return
-        previous_raw = state.get(key)
-        previous = int(previous_raw) if previous_raw is not None else 0
+        previous = _int_from_session_token_counter(state.get(key), key)
         state[key] = previous + delta
 
     add_to_key(TELEGRAM_USAGE_PROMPT_KEY, prompt_t)

@@ -439,6 +439,47 @@ class TestModelCallbacks:
         assert TELEGRAM_USAGE_COMPLETION_KEY not in state.to_dict()
         assert TELEGRAM_USAGE_TOTAL_KEY not in state.to_dict()
 
+    def test_after_model_telegram_tokens_corrupt_previous_does_not_crash(
+        self,
+        mock_llm_request: MockLlmRequest,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Corrupt session counters must not crash; treat base as 0."""
+        from agent.telegram_prefs import (
+            TELEGRAM_USAGE_COMPLETION_KEY,
+            TELEGRAM_USAGE_PROMPT_KEY,
+            TELEGRAM_USAGE_TOTAL_KEY,
+        )
+
+        state = MockState(
+            {
+                "user_id": "tg-3",
+                TELEGRAM_USAGE_PROMPT_KEY: "not-int",
+                TELEGRAM_USAGE_COMPLETION_KEY: ["bad"],
+                TELEGRAM_USAGE_TOTAL_KEY: object(),
+            },
+        )
+        ctx = MockLoggingCallbackContext(state=state)
+        monkeypatch.setattr("agent.callbacks.perf_counter", lambda: 0.0)
+        caplog.set_level(logging.WARNING)
+        callbacks = LoggingCallbacks()
+        llm_response = MockLlmResponse(
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=7,
+                candidates_token_count=2,
+                total_token_count=9,
+            ),
+        )
+        callbacks.before_model(ctx, mock_llm_request)  # type: ignore
+        callbacks.after_model(ctx, llm_response)  # type: ignore
+
+        assert state[TELEGRAM_USAGE_PROMPT_KEY] == 7
+        assert state[TELEGRAM_USAGE_COMPLETION_KEY] == 2
+        assert state[TELEGRAM_USAGE_TOTAL_KEY] == 9
+        assert "Invalid non-integer value for session token counter" in caplog.text
+        assert caplog.text.count("Invalid non-integer value") == 3
+
 
 class TestToolCallbacks:
     """Tests for tool invocation callbacks (before_tool and after_tool)."""
