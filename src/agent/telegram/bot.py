@@ -481,38 +481,159 @@ def _render_html_as_plain_text(text: str) -> str:
     return plain_text
 
 
-def _render_markdown_as_html(text: str) -> str:
-    """Convert common markdown patterns into Telegram-safe HTML."""
-    escaped_text = html.escape(text)
+def _split_markdown_to_segments(text: str) -> list[tuple[str, ...]]:
+    """Split markdown into ordered segments so code/links never cross format spans.
 
-    escaped_text = re.sub(
-        r"\[([^\]]+)\]\(([^)]+)\)",
-        lambda match: (
-            f'<a href="{html.escape(match.group(2), quote=True)}">{match.group(1)}</a>'
-        ),
-        escaped_text,
-    )
-    escaped_text = re.sub(
+    Each segment is ``("text", str)``, ``("code_inline", inner)``,
+    ``("code_block", inner)``, or ``("link", display, url)`` (three-tuple).
+    """
+    segments: list[tuple[str, ...]] = []
+    buf: list[str] = []
+    i = 0
+    n = len(text)
+
+    def flush_text() -> None:
+        if buf:
+            segments.append(("text", "".join(buf)))
+            buf.clear()
+
+    while i < n:
+        if text.startswith("```", i):
+            flush_text()
+            i += 3
+            fence_open = i - 3
+            lang_match = re.match(r"([a-zA-Z0-9_-]{0,32})\s*\n", text[i:])
+            if lang_match:
+                i += lang_match.end()
+            close = text.find("```", i)
+            if close == -1:
+                buf.append(text[fence_open:])
+                break
+            segments.append(("code_block", text[i:close]))
+            i = close + 3
+            continue
+
+        if text[i] == "`":
+            flush_text()
+            close = text.find("`", i + 1)
+            if close == -1:
+                buf.append(text[i])
+                i += 1
+                continue
+            segments.append(("code_inline", text[i + 1 : close]))
+            i = close + 1
+            continue
+
+        if text[i] == "[":
+            link_match = re.match(r"\[([^\]]*)\]\(([^)]*)\)", text[i:])
+            if link_match:
+                flush_text()
+                segments.append(
+                    ("link", link_match.group(1), link_match.group(2)),
+                )
+                i += link_match.end()
+                continue
+
+        buf.append(text[i])
+        i += 1
+
+    flush_text()
+    return segments
+
+
+def _apply_markdown_inline_to_escaped_html(escaped_text: str) -> str:
+    """Apply bold/italic/underline/strike/header patterns to already-escaped HTML."""
+    result = escaped_text
+    result = re.sub(
         r"(?m)^#{1,6}\s*(.+)$",
         lambda match: f"<b>{match.group(1).strip()}</b>",
-        escaped_text,
+        result,
     )
-    escaped_text = re.sub(r"(?<!\*)\*\*([^*]+)\*\*(?!\*)", r"<b>\1</b>", escaped_text)
-    escaped_text = re.sub(r"(?<!_)__([^_]+)__(?!_)", r"<u>\1</u>", escaped_text)
-    escaped_text = re.sub(r"~~([^~]+)~~", r"<s>\1</s>", escaped_text)
-    escaped_text = re.sub(
+    result = re.sub(r"(?<!\*)\*\*([^*]+)\*\*(?!\*)", r"<b>\1</b>", result)
+    result = re.sub(r"(?<!_)__([^_]+)__(?!_)", r"<u>\1</u>", result)
+    result = re.sub(r"~~([^~]+)~~", r"<s>\1</s>", result)
+    result = re.sub(
         r"(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)",
         r"<i>\1</i>",
-        escaped_text,
+        result,
     )
-    escaped_text = re.sub(
+    result = re.sub(
         r"(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)",
         r"<i>\1</i>",
-        escaped_text,
+        result,
     )
-    escaped_text = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped_text)
+    return result
 
-    return escaped_text.strip()
+
+def _telegram_html_tag_stack_valid(fragment: str) -> bool:
+    """Return True if Telegram HTML tags are properly nested and closed."""
+    tag_pattern = re.compile(
+        r"<(/?)(b|strong|i|em|u|s|strike|del|code|pre|a)\b[^>]*>",
+        re.IGNORECASE,
+    )
+    stack: list[str] = []
+
+    def normalize(name: str) -> str:
+        aliases = {"strong": "b", "em": "i", "strike": "s", "del": "s"}
+        return aliases.get(name.lower(), name.lower())
+
+    pos = 0
+    while pos < len(fragment):
+        match = tag_pattern.search(fragment, pos)
+        if not match:
+            break
+        is_close = match.group(1) == "/"
+        raw_name = match.group(2)
+        name = normalize(raw_name)
+        if name == "a":
+            if is_close:
+                if not stack or stack[-1] != "a":
+                    return False
+                stack.pop()
+            else:
+                stack.append("a")
+        elif is_close:
+            if not stack or stack[-1] != name:
+                return False
+            stack.pop()
+        else:
+            stack.append(name)
+        pos = match.end()
+
+    return len(stack) == 0
+
+
+def _render_markdown_as_html(text: str) -> str:
+    """Convert common markdown patterns into Telegram-safe HTML.
+
+    Code spans and fenced blocks are parsed before bold/italic so underscores
+    and asterisks inside code do not produce crossed ``<i>``/``<code>`` tags.
+    """
+    if not text:
+        return text
+
+    parts: list[str] = []
+    for segment in _split_markdown_to_segments(text):
+        match segment:
+            case ("text", body):
+                escaped = html.escape(body)
+                parts.append(_apply_markdown_inline_to_escaped_html(escaped))
+            case ("code_inline", inner):
+                parts.append(f"<code>{html.escape(inner)}</code>")
+            case ("code_block", inner):
+                parts.append(f"<pre>{html.escape(inner)}</pre>")
+            case ("link", display, url):
+                safe_href = html.escape(url, quote=True)
+                parts.append(
+                    f'<a href="{safe_href}">{html.escape(display)}</a>',
+                )
+            case _:
+                parts.append(html.escape(str(segment)))
+
+    rendered = "".join(parts).strip()
+    if not _telegram_html_tag_stack_valid(rendered):
+        return html.escape(text)
+    return rendered
 
 
 async def _send_validated_chunk(

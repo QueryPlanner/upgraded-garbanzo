@@ -17,6 +17,7 @@ from agent.telegram.bot import (
     _send_queued_telegram_documents,
     _send_validated_chunk,
     _split_and_send,
+    _telegram_html_tag_stack_valid,
     create_application,
     handle_message,
     help_command,
@@ -578,6 +579,9 @@ class TestSendValidatedChunk:
 class TestRenderMarkdownAsHtml:
     """Tests for markdown-to-HTML fallback rendering."""
 
+    def test_empty_markdown_returns_empty(self) -> None:
+        assert _render_markdown_as_html("") == ""
+
     def test_preserves_common_markdown_formatting(self) -> None:
         """Fallback HTML should keep useful formatting."""
         markdown = (
@@ -593,6 +597,73 @@ class TestRenderMarkdownAsHtml:
         assert "<code>6%</code>" in result
         assert '<a href="https://example.com">details</a>' in result
         assert r"\((1-\text{tax rate})\)" in result
+
+    def test_inline_code_before_italic_avoids_crossed_tags(self) -> None:
+        """Underscores inside backticks must not become <i> wrappers."""
+        markdown = "Use `snake_case` for *italic* only."
+        result = _render_markdown_as_html(markdown)
+        assert "<code>snake_case</code>" in result
+        assert "<i>italic</i>" in result
+        assert "</i></code>" not in result
+        assert "</code></i>" not in result
+
+    def test_fenced_code_preserves_asterisks_without_bold(self) -> None:
+        markdown = "```\n**not bold**\n```"
+        result = _render_markdown_as_html(markdown)
+        assert "<pre>" in result
+        assert "**not bold**" in result
+        assert "<b>not bold</b>" not in result
+
+    def test_telegram_html_stack_rejects_unclosed_tags(self) -> None:
+        """Validator must catch unclosed formatting so callers can fall back."""
+        assert _telegram_html_tag_stack_valid("<b>only open") is False
+        assert _telegram_html_tag_stack_valid("<b>ok</b>") is True
+
+    def test_telegram_html_stack_anchor_mismatch(self) -> None:
+        """Mis-nested or orphan anchor tags must fail validation."""
+        assert _telegram_html_tag_stack_valid('<a href="https://x">x</a>') is True
+        assert _telegram_html_tag_stack_valid("</a>") is False
+        assert _telegram_html_tag_stack_valid('<a href="https://x">x') is False
+
+    def test_telegram_html_stack_rejects_mismatched_close_tag(self) -> None:
+        assert _telegram_html_tag_stack_valid("<i>x</b>") is False
+
+    def test_split_handles_unclosed_fence_and_backtick(self) -> None:
+        """Unclosed constructs are treated as literal text where appropriate."""
+        from agent.telegram.bot import _split_markdown_to_segments
+
+        segs = _split_markdown_to_segments("```\nno closing")
+        assert [s[0] for s in segs] == ["text"]
+        assert segs[0][1] == "```\nno closing"
+
+        segs2 = _split_markdown_to_segments("no ` closing")
+        assert all(s[0] == "text" for s in segs2)
+        assert "".join(s[1] for s in segs2) == "no ` closing"
+
+    def test_render_falls_back_to_escaped_plain_when_stack_invalid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If post-render HTML is invalid, send fully escaped source markdown."""
+        monkeypatch.setattr(
+            "agent.telegram.bot._telegram_html_tag_stack_valid",
+            lambda _fragment: False,
+        )
+        assert _render_markdown_as_html("hello **world**") == "hello **world**"
+
+    def test_render_unknown_segment_kind_is_escaped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unexpected segment tuples are stringified and escaped."""
+
+        def fake_segments(_t: str) -> list[tuple[str, ...]]:
+            return [("bogus", "x")]
+
+        monkeypatch.setattr(
+            "agent.telegram.bot._split_markdown_to_segments",
+            fake_segments,
+        )
+        out = _render_markdown_as_html("ignored")
+        assert "bogus" in out
 
 
 class TestSplitAndSend:

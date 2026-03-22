@@ -1,5 +1,6 @@
 """Unit tests for custom tools."""
 
+import json
 import logging
 import os
 import tempfile
@@ -918,6 +919,66 @@ class TestSendTelegramFile:
         assert pending[0].caption == "see file"
         assert pending[0].path.read_text(encoding="utf-8") == "hello world"
         pending[0].path.unlink(missing_ok=True)
+
+    def test_dict_body_is_pretty_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """LLMs often pass structured exports as dict; coerce to JSON text."""
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        payload = {
+            "calorie_entries": [
+                {
+                    "id": 15,
+                    "date": "2026-03-22",
+                    "food": "Rice",
+                    "calories": 180,
+                }
+            ]
+        }
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=payload,
+            text_file_name="export.json",
+        )
+        assert result["status"] == "success"
+        pending = end_telegram_file_batch()
+        written = pending[0].path.read_text(encoding="utf-8")
+        assert json.loads(written) == payload
+        pending[0].path.unlink(missing_ok=True)
+
+    def test_invalid_text_file_body_type_returns_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=42,
+            text_file_name="x.txt",
+        )
+        assert result["status"] == "error"
+        assert "text_file_body" in result["message"]
+        end_telegram_file_batch()
+
+    def test_dict_body_not_json_serializable_returns_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        circular: dict[str, object] = {}
+        circular["k"] = circular
+        result = send_telegram_file(
+            tool_context,  # type: ignore[arg-type]
+            text_file_body=circular,
+            text_file_name="bad.json",
+        )
+        assert result["status"] == "error"
+        assert "JSON" in result["message"]
+        end_telegram_file_batch()
 
     def test_text_body_absolute_path_sends_file_not_path_string(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

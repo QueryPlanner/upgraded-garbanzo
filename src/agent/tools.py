@@ -1,6 +1,7 @@
 """Custom tools for the LLM agent."""
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import dateparser
+import httpx
 from google.adk.tools import ToolContext
 
 from .fitness import (
@@ -44,6 +46,12 @@ _DOCKER_BASH_MAX_COMMAND_CHARS = 12_000
 _DOCKER_BASH_MIN_TIMEOUT_SEC = 1
 _DOCKER_BASH_MAX_TIMEOUT_SEC = 300
 _DOCKER_BASH_MAX_COMBINED_OUTPUT_BYTES = 256_000
+_BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/web/search"
+_BRAVE_SEARCH_TIMEOUT_SECONDS = 15.0
+_BRAVE_SEARCH_DEFAULT_COUNT = 5
+_BRAVE_SEARCH_MAX_COUNT = 20
+_BRAVE_SEARCH_MAX_OFFSET = 9
+_BRAVE_SEARCH_ALLOWED_SAFESEARCH = {"off", "moderate", "strict"}
 
 SUPPORTED_RECURRENCE_MESSAGE = (
     "Recurring reminders must use a 5-field cron expression in the app "
@@ -258,6 +266,30 @@ def _validate_single_download_filename(name: str) -> str:
     return cleaned
 
 
+def _coerce_text_file_body_to_string(body: Any) -> str:
+    """Normalize ``text_file_body`` to UTF-8 text for staging or path detection."""
+    if isinstance(body, str):
+        return body
+    if isinstance(body, (dict, list, tuple)):
+        try:
+            return json.dumps(
+                body,
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "text_file_body structure could not be encoded as JSON text."
+            ) from exc
+    raise ValueError(
+        "text_file_body must be a string (raw file content, or one line that is "
+        "an absolute path to an existing file), or a dict/list/tuple (pretty "
+        "JSON). To attach a file already on disk, use agent_data_path with that "
+        "path instead of embedding the path inside a JSON object."
+    )
+
+
 def _existing_file_if_text_body_is_path_string(body: str) -> Path | None:
     """If ``body`` is a single-line absolute (or ``~/``) path to a file, return it.
 
@@ -327,28 +359,53 @@ def send_telegram_file(
     caption: str | None = None,
     context_filename: str | None = None,
     agent_data_path: str | None = None,
-    text_file_body: str | None = None,
+    text_file_body: Any | None = None,
     text_file_name: str | None = None,
 ) -> dict[str, Any]:
     """Queue a file to send to the user on Telegram after your reply finishes.
 
     Only works during a Telegram bot turn (not the HTTP API server alone).
-    Provide exactly one of: a ``.context`` file, a file path (see below), or
-    inline text saved as a small downloadable file.
+    Pick **exactly one** source: a ``.context`` file name, ``agent_data_path``,
+    or ``text_file_body`` (+ ``text_file_name``).
+
+    **Choosing a mode**
+
+    * **Binary or large file already on disk** (e.g. ``.db``, ``.png``, a JSON
+      file you wrote under ``/tmp``): use ``agent_data_path`` with a **string**
+      path (relative under agent data, or absolute on the host such as
+      ``/tmp/export.json``). Do **not** put the path string inside
+      ``text_file_body`` as a JSON field only; the tool must receive the path
+      via ``agent_data_path`` (or as a **single-line** absolute path string in
+      ``text_file_body``, see below).
+    * **Small UTF-8 text you construct in the tool call**: use
+      ``text_file_body`` as a **string** plus ``text_file_name``.
+    * **Structured export (rows, reminders, calorie lists)**: pass
+      ``text_file_body`` as a **dict or list**; it is converted to pretty JSON
+      text automatically. Prefer ``text_file_name`` ending in ``.json`` (e.g.
+      ``fitness_export.json``). Same 512 KiB limit after JSON encoding.
+
+    **text_file_body string semantics**
+
+    * Normal case: the string is the **entire file content** (may be
+      multi-line).
+    * Special case: if the string is a **single line** that looks like an
+      **absolute** path (or ``~/...``) and that path exists as a file, the tool
+      sends **that file's bytes** instead of the path text (safety net when
+      the model pasted a path by mistake).
 
     Args:
         tool_context: ADK ToolContext (must include ``user_id`` for Telegram).
         caption: Optional short caption (Telegram truncates long captions).
         context_filename: Single file name in ``.context/`` (same rules as
             ``read_context_file``).
-        agent_data_path: Either a **relative** path under the agent data
-            directory (slashes OK; ``..`` forbidden), or an **absolute** path
-            to any regular file on the host (e.g. ``/app/agent_data/x.png``).
-        text_file_body: UTF-8 text to send as a new file (max 512 KiB). If this
-            is a **single-line absolute** path (or ``~/...``) to an existing file,
-            that file is sent instead (avoids accidentally sending the path
-            string as the file body).
-        text_file_name: Required with ``text_file_body`` (e.g. ``notes.txt``).
+        agent_data_path: **String** path: relative under agent data, or absolute
+            host path to an existing regular file (best for ``.db`` and files
+            written to disk first).
+        text_file_body: **String** (file text or one-line path as above), or
+            **dict/list/tuple** (serialized to JSON). Not for arbitrary Python
+            scalars; use a string for plain text.
+        text_file_name: Required with ``text_file_body`` (e.g. ``notes.txt`` or
+            ``data.json``). No directories or slashes.
 
     Returns:
         Status and staging metadata, or an error message.
@@ -378,7 +435,7 @@ def send_telegram_file(
 
     try:
         if has_text:
-            body = cast(str, text_file_body)
+            body = _coerce_text_file_body_to_string(text_file_body)
             if text_file_name is None or not str(text_file_name).strip():
                 return {
                     "status": "error",
@@ -1232,6 +1289,154 @@ async def delete_fitness_entry(
     except Exception as e:
         logger.exception("Failed to delete entry")
         return {"status": "error", "message": f"Failed to delete entry: {e}"}
+
+
+# ============================================================================
+# BRAVE SEARCH TOOLS
+# ============================================================================
+
+
+def brave_web_search(
+    tool_context: ToolContext,  # noqa: ARG001
+    query: str,
+    count: int = _BRAVE_SEARCH_DEFAULT_COUNT,
+    offset: int = 0,
+    safesearch: str = "moderate",
+    country: str | None = None,
+    search_lang: str | None = None,
+    extra_snippets: bool = False,
+) -> dict[str, Any]:
+    """Search the public web with Brave Search.
+
+    Uses the Brave Web Search API. Requires ``BRAVE_SEARCH_API_KEY`` in the
+    environment. Returns compact, agent-friendly result objects with title, URL,
+    description, and optional extra snippets.
+
+    Args:
+        tool_context: ADK ToolContext (unused; required by ADK).
+        query: Search query string.
+        count: Number of results to return (1-20, default 5).
+        offset: Pagination offset (0-9, default 0).
+        safesearch: Adult-content filtering: off, moderate, or strict.
+        country: Optional two-letter country code like ``US`` or ``IN``.
+        search_lang: Optional language code like ``en`` or ``de``.
+        extra_snippets: Whether Brave should include additional snippets.
+
+    Returns:
+        Status, normalized search results, and pagination metadata.
+    """
+    _ = tool_context
+
+    trimmed_query = query.strip()
+    if not trimmed_query:
+        return {"status": "error", "message": "query must be a non-empty string."}
+
+    if count < 1 or count > _BRAVE_SEARCH_MAX_COUNT:
+        return {
+            "status": "error",
+            "message": (
+                f"count must be between 1 and {_BRAVE_SEARCH_MAX_COUNT} results."
+            ),
+        }
+
+    if offset < 0 or offset > _BRAVE_SEARCH_MAX_OFFSET:
+        return {
+            "status": "error",
+            "message": (f"offset must be between 0 and {_BRAVE_SEARCH_MAX_OFFSET}."),
+        }
+
+    normalized_safesearch = safesearch.strip().lower()
+    if normalized_safesearch not in _BRAVE_SEARCH_ALLOWED_SAFESEARCH:
+        allowed_values = ", ".join(sorted(_BRAVE_SEARCH_ALLOWED_SAFESEARCH))
+        return {
+            "status": "error",
+            "message": f"safesearch must be one of: {allowed_values}.",
+        }
+
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+    if not api_key:
+        return {
+            "status": "error",
+            "message": "BRAVE_SEARCH_API_KEY is not configured.",
+        }
+
+    params: dict[str, str | int | bool] = {
+        "q": trimmed_query,
+        "count": count,
+        "offset": offset,
+        "safesearch": normalized_safesearch,
+        "extra_snippets": extra_snippets,
+    }
+    if country:
+        params["country"] = country.strip().upper()
+    if search_lang:
+        params["search_lang"] = search_lang.strip().lower()
+
+    headers = {"X-Subscription-Token": api_key}
+
+    try:
+        response = httpx.get(
+            _BRAVE_SEARCH_API_URL,
+            params=params,
+            headers=headers,
+            timeout=_BRAVE_SEARCH_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as error:
+        logger.warning(
+            "Brave search failed with HTTP %s for query=%r",
+            error.response.status_code,
+            trimmed_query,
+        )
+        return {
+            "status": "error",
+            "message": (
+                f"Brave search request failed with HTTP {error.response.status_code}."
+            ),
+        }
+    except httpx.HTTPError as error:
+        logger.warning(
+            "Brave search request error for query=%r: %s", trimmed_query, error
+        )
+        return {
+            "status": "error",
+            "message": f"Brave search request failed: {error}",
+        }
+
+    payload = response.json()
+    query_payload = payload.get("query", {})
+    web_payload = payload.get("web", {})
+    raw_results = web_payload.get("results", [])
+
+    normalized_results: list[dict[str, Any]] = []
+    for item in raw_results:
+        normalized_results.append(
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "description": item.get("description", ""),
+                "extra_snippets": item.get("extra_snippets", []),
+                "age": item.get("age"),
+                "language": item.get("language"),
+            }
+        )
+
+    logger.info(
+        "Brave web search returned %s results for query=%r",
+        len(normalized_results),
+        trimmed_query,
+    )
+
+    return {
+        "status": "success",
+        "query": query_payload.get("original", trimmed_query),
+        "results": normalized_results,
+        "count": len(normalized_results),
+        "more_results_available": bool(
+            query_payload.get("more_results_available", False)
+        ),
+        "message": f"Found {len(normalized_results)} web result(s).",
+    }
 
 
 # ============================================================================
