@@ -29,6 +29,7 @@ dependencies = [
     "apscheduler>=3.11.0,<4.0.0",
     # Natural language date/time parsing
     "dateparser>=1.2.0,<2.0.0",
+    "httpx>=0.28.1,<1.0.0",
     # YAML parsing for skill files
     "pyyaml>=6.0.0,<7.0.0",
     # YouTube transcript extraction

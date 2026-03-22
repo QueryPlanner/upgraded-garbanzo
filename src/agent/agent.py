@@ -24,6 +24,7 @@ from .callbacks import (  # noqa: E402
 )
 from .litellm_config import build_litellm_kwargs  # noqa: E402
 from .litellm_session_router import TelegramLitellmRouter  # noqa: E402
+from .mcp import create_mcp_toolsets  # noqa: E402
 from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
@@ -37,6 +38,7 @@ from .telegram_litellm_request_plugin import (  # noqa: E402
 __all__ = ["root_agent", "app"]
 from .tools import (  # noqa: E402
     add_calories,
+    brave_web_search,
     cancel_reminder,
     delete_context_file,
     delete_fitness_entry,
@@ -74,6 +76,8 @@ logger.info("LiteLlm model created successfully (with Telegram per-session routi
 # Create skill toolset for lazy-loading capabilities
 skill_toolset = create_skill_toolset()
 logger.info("Skill toolset created")
+mcp_toolsets = create_mcp_toolsets()
+logger.info("Created %s MCP toolset(s)", len(mcp_toolsets))
 
 root_agent = LlmAgent(
     name="garbanzo",
@@ -85,6 +89,7 @@ root_agent = LlmAgent(
     tools=[
         # PreloadMemoryTool(),
         example_tool,
+        brave_web_search,
         # Reminder tools
         get_current_datetime,
         schedule_reminder,
@@ -111,6 +116,7 @@ root_agent = LlmAgent(
         send_telegram_file,
         # Skills (lazy-loaded toolsets)
         skill_toolset,
+        *mcp_toolsets,
     ],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,

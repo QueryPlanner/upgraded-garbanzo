@@ -38,7 +38,7 @@ FROM python:3.13-slim AS runtime
 
 # Install system dependencies
 # - netcat-openbsd: for checking DB readiness (used in entrypoint.sh)
-# - Node.js 22+ (NodeSource): required by @tobilu/qmd; global CLIs below
+# - Node.js 22+ (NodeSource): required by @tobilu/qmd and MCP CLIs below
 # - build deps: native addons during npm install (purged after install)
 # - chromium: browser for agent-browser (Chrome-for-Testing install has no linux-arm64)
 # - curl, ca-certificates, gnupg: HTTPS and NodeSource repo
@@ -57,7 +57,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g agent-browser @tobilu/qmd \
+    && npm install -g agent-browser @tobilu/qmd @notionhq/notion-mcp-server \
     && apt-get purge -y build-essential cmake libsqlite3-dev \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
@@ -107,7 +107,7 @@ COPY --chown=app:app memory/MEMORY.md /app/.memory-seed/MEMORY.md
 
 # Set environment to use virtual environment
 ENV VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:$PATH" \
+    PATH="/home/app/.local/bin:/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     AGENT_DIR=/app/src \
     AGENT_SKILLS_DIR=/app/skills \
@@ -117,6 +117,11 @@ ENV VIRTUAL_ENV=/app/.venv \
 
 # Switch to non-root user
 USER app
+
+# Install Claude Code for in-container developer workflows and MCP support.
+RUN mkdir -p /home/app/.claude /home/app/.local/bin /home/app/.local/share \
+    && curl -fsSL https://claude.ai/install.sh | bash \
+    && claude --version
 
 # Expose port (default 8080)
 EXPOSE 8080
