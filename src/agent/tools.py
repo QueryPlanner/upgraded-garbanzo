@@ -1,6 +1,7 @@
 """Custom tools for the LLM agent."""
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -265,6 +266,30 @@ def _validate_single_download_filename(name: str) -> str:
     return cleaned
 
 
+def _coerce_text_file_body_to_string(body: Any) -> str:
+    """Normalize ``text_file_body`` to UTF-8 text for staging or path detection."""
+    if isinstance(body, str):
+        return body
+    if isinstance(body, (dict, list, tuple)):
+        try:
+            return json.dumps(
+                body,
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "text_file_body structure could not be encoded as JSON text."
+            ) from exc
+    raise ValueError(
+        "text_file_body must be a string (raw file content, or one line that is "
+        "an absolute path to an existing file), or a dict/list/tuple (pretty "
+        "JSON). To attach a file already on disk, use agent_data_path with that "
+        "path instead of embedding the path inside a JSON object."
+    )
+
+
 def _existing_file_if_text_body_is_path_string(body: str) -> Path | None:
     """If ``body`` is a single-line absolute (or ``~/``) path to a file, return it.
 
@@ -334,28 +359,53 @@ def send_telegram_file(
     caption: str | None = None,
     context_filename: str | None = None,
     agent_data_path: str | None = None,
-    text_file_body: str | None = None,
+    text_file_body: Any | None = None,
     text_file_name: str | None = None,
 ) -> dict[str, Any]:
     """Queue a file to send to the user on Telegram after your reply finishes.
 
     Only works during a Telegram bot turn (not the HTTP API server alone).
-    Provide exactly one of: a ``.context`` file, a file path (see below), or
-    inline text saved as a small downloadable file.
+    Pick **exactly one** source: a ``.context`` file name, ``agent_data_path``,
+    or ``text_file_body`` (+ ``text_file_name``).
+
+    **Choosing a mode**
+
+    * **Binary or large file already on disk** (e.g. ``.db``, ``.png``, a JSON
+      file you wrote under ``/tmp``): use ``agent_data_path`` with a **string**
+      path (relative under agent data, or absolute on the host such as
+      ``/tmp/export.json``). Do **not** put the path string inside
+      ``text_file_body`` as a JSON field only; the tool must receive the path
+      via ``agent_data_path`` (or as a **single-line** absolute path string in
+      ``text_file_body``, see below).
+    * **Small UTF-8 text you construct in the tool call**: use
+      ``text_file_body`` as a **string** plus ``text_file_name``.
+    * **Structured export (rows, reminders, calorie lists)**: pass
+      ``text_file_body`` as a **dict or list**; it is converted to pretty JSON
+      text automatically. Prefer ``text_file_name`` ending in ``.json`` (e.g.
+      ``fitness_export.json``). Same 512 KiB limit after JSON encoding.
+
+    **text_file_body string semantics**
+
+    * Normal case: the string is the **entire file content** (may be
+      multi-line).
+    * Special case: if the string is a **single line** that looks like an
+      **absolute** path (or ``~/...``) and that path exists as a file, the tool
+      sends **that file's bytes** instead of the path text (safety net when
+      the model pasted a path by mistake).
 
     Args:
         tool_context: ADK ToolContext (must include ``user_id`` for Telegram).
         caption: Optional short caption (Telegram truncates long captions).
         context_filename: Single file name in ``.context/`` (same rules as
             ``read_context_file``).
-        agent_data_path: Either a **relative** path under the agent data
-            directory (slashes OK; ``..`` forbidden), or an **absolute** path
-            to any regular file on the host (e.g. ``/app/agent_data/x.png``).
-        text_file_body: UTF-8 text to send as a new file (max 512 KiB). If this
-            is a **single-line absolute** path (or ``~/...``) to an existing file,
-            that file is sent instead (avoids accidentally sending the path
-            string as the file body).
-        text_file_name: Required with ``text_file_body`` (e.g. ``notes.txt``).
+        agent_data_path: **String** path: relative under agent data, or absolute
+            host path to an existing regular file (best for ``.db`` and files
+            written to disk first).
+        text_file_body: **String** (file text or one-line path as above), or
+            **dict/list/tuple** (serialized to JSON). Not for arbitrary Python
+            scalars; use a string for plain text.
+        text_file_name: Required with ``text_file_body`` (e.g. ``notes.txt`` or
+            ``data.json``). No directories or slashes.
 
     Returns:
         Status and staging metadata, or an error message.
@@ -385,7 +435,7 @@ def send_telegram_file(
 
     try:
         if has_text:
-            body = cast(str, text_file_body)
+            body = _coerce_text_file_body_to_string(text_file_body)
             if text_file_name is None or not str(text_file_name).strip():
                 return {
                     "status": "error",
