@@ -22,4 +22,10 @@ if echo "$DATABASE_URL" | grep -q "postgresql://"; then
     echo "Database started"
 fi
 
+# Persisted memory volume may mount an empty directory; restore template once.
+if [ ! -f /app/memory/MEMORY.md ] && [ -f /app/.memory-seed/MEMORY.md ]; then
+    mkdir -p /app/memory
+    cp /app/.memory-seed/MEMORY.md /app/memory/MEMORY.md
+fi
+
 exec "$@"

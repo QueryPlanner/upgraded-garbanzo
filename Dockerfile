@@ -38,20 +38,31 @@ FROM python:3.13-slim AS runtime
 
 # Install system dependencies
 # - netcat-openbsd: for checking DB readiness (used in entrypoint.sh)
-# - nodejs/npm: global agent-browser CLI
+# - Node.js 22+ (NodeSource): required by @tobilu/qmd; global CLIs below
+# - build deps: native addons during npm install (purged after install)
 # - chromium: browser for agent-browser (Chrome-for-Testing install has no linux-arm64)
-# - curl, ca-certificates: HTTPS for npm and browser downloads
+# - curl, ca-certificates, gnupg: HTTPS and NodeSource repo
 RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     ca-certificates \
     curl \
+    gnupg \
     chromium \
-    nodejs \
-    npm \
+    build-essential \
+    cmake \
+    libsqlite3-dev \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g agent-browser @tobilu/qmd \
+    && apt-get purge -y build-essential cmake libsqlite3-dev \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# agent-browser CLI (uses AGENT_BROWSER_EXECUTABLE_PATH + distro Chromium)
-RUN npm install -g agent-browser
+# qmd global CLI available as `qmd` (see agent prompt for MEMORY.md + indexing)
 
 # Create non-root user for security (matching common host UID 1000)
 RUN groupadd -g 1000 app && \
@@ -64,9 +75,11 @@ WORKDIR /app
 # - /app/src/.adk: ADK artifacts
 # - /app/src/agent/data: Local SQLite fallback and other files when not using Postgres
 # - /app/src/.context: Context files (USER.md, IDENTITY.md, SOUL.md)
+# - /app/memory: durable agent memory (MEMORY.md); seed copied in entrypoint if empty
 RUN mkdir -p /app/src/.adk/artifacts \
              /app/src/agent/data \
              /app/src/.context \
+             /app/memory \
     && chown -R app:app /app
 
 # Copy application and virtual environment from builder
@@ -88,6 +101,9 @@ COPY --chown=app:app .context/*.md /app/src/.context/
 
 # Skill markdown (lazy-loaded via SkillToolset); non-editable installs need this path
 COPY --chown=app:app skills /app/skills
+
+# Default MEMORY.md template (entrypoint copies into /app/memory when volume is empty)
+COPY --chown=app:app memory/MEMORY.md /app/.memory-seed/MEMORY.md
 
 # Set environment to use virtual environment
 ENV VIRTUAL_ENV=/app/.venv \

@@ -2,7 +2,6 @@
 
 import logging
 import os
-from typing import Any
 
 # Load environment variables BEFORE any other imports
 # This ensures ROOT_AGENT_MODEL and API keys are available at module load time
@@ -23,6 +22,7 @@ from .callbacks import (  # noqa: E402
     add_session_to_memory,
     notify_tool_call,
 )
+from .litellm_config import build_litellm_kwargs  # noqa: E402
 from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
@@ -59,44 +59,7 @@ logging_callbacks = LoggingCallbacks()
 
 # Determine model configuration
 model_name = os.getenv("ROOT_AGENT_MODEL", "gemini-2.5-flash")
-
-# Build LiteLlm model configuration
-# LiteLlm is used for all models to support OpenRouter and other providers
-litellm_kwargs: dict[str, Any] = {"model": model_name}
-
-# Configure API key based on provider
-if model_name.lower().startswith("openrouter/"):
-    openrouter_key = os.getenv("OPENROUTER_API_KEY")
-    if not openrouter_key:
-        raise ValueError(
-            "OPENROUTER_API_KEY environment variable is required for OpenRouter models"
-        )
-    litellm_kwargs["api_key"] = openrouter_key
-    logger.info(f"Configuring OpenRouter model: {model_name}")
-
-    # Provider enforcement for OpenRouter models
-    # OpenRouter can serve some models through multiple providers with varying
-    # quality/cost. Use OPENROUTER_PROVIDER_ORDER env var to specify preference.
-    # Example: OPENROUTER_PROVIDER_ORDER='["google-vertex", "together"]'
-    # See: https://openrouter.ai/docs/provider-routing
-    provider_order = os.getenv("OPENROUTER_PROVIDER_ORDER")
-    if provider_order:
-        import json
-
-        try:
-            litellm_kwargs["extra_body"] = {
-                "provider": {"order": json.loads(provider_order)}
-            }
-            logger.info(f"OpenRouter provider order: {provider_order}")
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid OPENROUTER_PROVIDER_ORDER JSON: {provider_order}")
-
-elif model_name.lower().startswith("gemini") or model_name.lower().startswith("google"):
-    # For Google models, we can use either GOOGLE_API_KEY or the default
-    google_key = os.getenv("GOOGLE_API_KEY")
-    if google_key:
-        litellm_kwargs["api_key"] = google_key
-    logger.info(f"Configuring Google model via LiteLlm: {model_name}")
+litellm_kwargs = build_litellm_kwargs(model_name)
 
 # Create LiteLlm model
 logger.info(f"Creating LiteLlm with model: {model_name}")

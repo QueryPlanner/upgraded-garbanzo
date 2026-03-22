@@ -84,6 +84,7 @@ def main() -> None:
         DATABASE_URL: Postgres for ADK sessions (if enabled) and app tables
         ADK_USE_DATABASE_SESSION: false = in-memory sessions; DB URL for app tables only
         OPENROUTER_API_KEY: Key for LiteLLM/OpenRouter
+        OPENAI_API_KEY / OPENAI_API_BASE (or OPENAI_BASE_URL): OpenAI-compatible API
         ALLOW_ORIGINS: JSON array string of allowed CORS origins
         HOST: Server host (default: 127.0.0.1, set to 0.0.0.0 for containers)
         PORT: Server port (default: 8080)
