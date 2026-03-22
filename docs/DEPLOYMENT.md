@@ -37,21 +37,22 @@ sudo ./setup.sh
 
 On every push to **`main`**, after **code quality** (`ruff`, `mypy`, `pytest`) passes:
 
-1. A **self-hosted** runner checks out the repo (with `clean: false` so a local **`.env`** is not deleted), then runs **`docker compose -f compose.yaml build`** and **`up -d`**. **`compose.yaml`** pins the image name to **`adk-agent:current`** — remove any legacy **`IMAGE=ghcr.io/...`** from `.env` when using this file so you are not still tied to an old registry tag. **`.env`** lives only on the host in the runner’s checkout (not from GitHub Actions secrets).
+1. A **self-hosted** runner checks out the repo (with `clean: false` so a local **`.env`** is not deleted), then runs **`docker compose -f compose.yaml build`** and **`up -d`**. **`compose.yaml`** pins the image to **`adk-agent:current`**. Remove any legacy **`IMAGE=ghcr.io/...`** from `.env` for this compose file so you are not stuck on an old registry tag. **`.env`** lives only on the host in the runner’s checkout (not from GitHub Actions secrets).
 2. Before each build, the workflow tags **`adk-agent:current` → `adk-agent:previous`** for rollback.
 
-Configure a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) on the same machine as Docker. **First run:** create `.env` in the runner’s repo directory (next to `compose.yaml`).
+Configure a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) on the same machine as Docker. **First time:** create `.env` next to `compose.yaml` (often under `actions-runner/_work/<repo>/<repo>/` unless you customize the runner).
 
 **Rollback** (from that checkout):
 
 ```bash
+cd /path/to/repo/checkout   # runner work dir or your fixed clone
 docker tag adk-agent:previous adk-agent:current
 docker compose -f compose.yaml up -d
 ```
 
 ### Optional: GHCR pull-only deploy
 
-Use **`compose.image.yaml`**, set **`IMAGE=ghcr.io/<org>/<repo>:<tag>`** in `.env`, then `docker compose pull && docker compose up -d`. Add your own workflow if you need automated GHCR builds.
+Use **`compose.image.yaml`**, set **`IMAGE=ghcr.io/<org>/<repo>:<tag>`** in `.env`, then `docker compose pull && docker compose up -d`. The default **`main`** workflow does **not** push to GHCR; add a separate workflow if you need automated registry publishes.
 
 ### Server without a git clone (image only)
 

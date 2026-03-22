@@ -23,12 +23,16 @@ from .callbacks import (  # noqa: E402
     notify_tool_call,
 )
 from .litellm_config import build_litellm_kwargs  # noqa: E402
+from .litellm_session_router import TelegramLitellmRouter  # noqa: E402
 from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
     return_instruction_root,
 )
 from .skills.loader import create_skill_toolset  # noqa: E402
+from .telegram_litellm_request_plugin import (  # noqa: E402
+    TelegramLitellmRequestModelPlugin,
+)
 
 __all__ = ["root_agent", "app"]
 from .tools import (  # noqa: E402
@@ -61,10 +65,11 @@ logging_callbacks = LoggingCallbacks()
 model_name = os.getenv("ROOT_AGENT_MODEL", "gemini-2.5-flash")
 litellm_kwargs = build_litellm_kwargs(model_name)
 
-# Create LiteLlm model
+# Create LiteLlm model (Telegram may override per chat via context var + session state)
 logger.info(f"Creating LiteLlm with model: {model_name}")
-model = LiteLlm(**litellm_kwargs)
-logger.info("LiteLlm model created successfully")
+_default_litellm = LiteLlm(**litellm_kwargs)
+model = TelegramLitellmRouter.wrapping(_default_litellm)
+logger.info("LiteLlm model created successfully (with Telegram per-session routing)")
 
 # Create skill toolset for lazy-loading capabilities
 skill_toolset = create_skill_toolset()
@@ -119,6 +124,8 @@ app = App(
     root_agent=root_agent,
     plugins=[
         GlobalInstructionPlugin(return_global_instruction),
+        # Before LoggingPlugin so ``LlmRequest.model`` matches Telegram override in logs
+        TelegramLitellmRequestModelPlugin(),
         LoggingPlugin(),
     ],
     events_compaction_config=None,

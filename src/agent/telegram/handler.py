@@ -7,9 +7,11 @@ and the ADK agent, allowing users to interact with the agent via Telegram.
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from google.adk.agents import LlmAgent
 from google.adk.apps import App
@@ -19,6 +21,8 @@ from google.adk.runners import InMemoryRunner, Runner
 from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai import types
 
+from ..litellm_session_router import CURRENT_TELEGRAM_LITELLM_MODEL
+from ..telegram_prefs import TELEGRAM_SESSION_LITELLM_MODEL_KEY
 from ..utils.app_timezone import format_stored_instant_for_display
 from ..utils.telegram_outbox import (
     PendingTelegramFile,
@@ -26,11 +30,31 @@ from ..utils.telegram_outbox import (
     discard_telegram_staging_files,
     end_telegram_file_batch,
 )
+from .model_settings import default_root_model
 
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+def _read_litellm_model_from_state(state: dict[str, Any] | None) -> str | None:
+    if not state:
+        return None
+    raw = state.get(TELEGRAM_SESSION_LITELLM_MODEL_KEY)
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        return stripped or None
+    return None
+
+
+@asynccontextmanager
+async def _telegram_litellm_model_context(model_id: str) -> AsyncIterator[None]:
+    token = CURRENT_TELEGRAM_LITELLM_MODEL.set(model_id)
+    try:
+        yield
+    finally:
+        CURRENT_TELEGRAM_LITELLM_MODEL.reset(token)
 
 
 @dataclass(frozen=True)
@@ -154,11 +178,25 @@ class TelegramHandler:
         else:
             raise ValueError("Either 'agent' or 'app' must be provided")
 
+    def _resolve_litellm_model_for_session_state(
+        self,
+        session_state: dict[str, Any] | None,
+        *,
+        force_litellm_model: str | None,
+    ) -> str:
+        if force_litellm_model is not None and force_litellm_model.strip():
+            return force_litellm_model.strip()
+        override = _read_litellm_model_from_state(session_state)
+        if override is not None:
+            return override
+        return default_root_model()
+
     async def process_message(
         self,
         user_id: str,
         message: str,
         session_id: str | None = None,
+        force_litellm_model: str | None = None,
     ) -> TelegramAgentReply:
         """Process a message through the ADK agent.
 
@@ -167,6 +205,8 @@ class TelegramHandler:
             message: The message text to process.
             session_id: Optional session ID for conversation continuity.
                 If not provided, user_id is used as session_id.
+            force_litellm_model: When set (e.g. reminder delivery), use this
+                LiteLLM model id instead of reading from session state.
 
         Returns:
             Reply text and any files tools queued for Telegram delivery.
@@ -238,32 +278,37 @@ class TelegramHandler:
         run_started = time.perf_counter()
         first_stream_event_logged = False
         begin_telegram_file_batch()
+        resolved_model = self._resolve_litellm_model_for_session_state(
+            session.state,
+            force_litellm_model=force_litellm_model,
+        )
         try:
-            async for event in self.runner.run_async(
-                user_id=user_id,
-                session_id=effective_session_id,
-                new_message=content,
-            ):
-                if latency_log and not first_stream_event_logged:
-                    first_stream_event_logged = True
-                    first_event = time.perf_counter()
-                    ms_after_run = (first_event - run_started) * 1000
-                    logger.info(
-                        "telegram.adk_first_stream_event user_id=%s "
-                        "ms_after_run_async_started=%.1f "
-                        "(often includes LLM; first yield may be late)",
-                        user_id,
-                        ms_after_run,
-                    )
+            async with _telegram_litellm_model_context(resolved_model):
+                async for event in self.runner.run_async(
+                    user_id=user_id,
+                    session_id=effective_session_id,
+                    new_message=content,
+                ):
+                    if latency_log and not first_stream_event_logged:
+                        first_stream_event_logged = True
+                        first_event = time.perf_counter()
+                        ms_after_run = (first_event - run_started) * 1000
+                        logger.info(
+                            "telegram.adk_first_stream_event user_id=%s "
+                            "ms_after_run_async_started=%.1f "
+                            "(often includes LLM; first yield may be late)",
+                            user_id,
+                            ms_after_run,
+                        )
 
-                # Extract text from model responses, filtering out thought parts
-                # Thought parts contain internal reasoning and should not be shown
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, "thought") and part.thought:
-                            continue
-                        if part.text:
-                            response_parts.append(part.text)
+                    # Extract text from model responses, filtering out thought parts
+                    # Thought parts contain internal reasoning and should not be shown
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, "thought") and part.thought:
+                                continue
+                            if part.text:
+                                response_parts.append(part.text)
         except Exception:
             pending_on_error = end_telegram_file_batch()
             discard_telegram_staging_files(pending_on_error)
@@ -384,11 +429,22 @@ class TelegramHandler:
                 session_id=effective_session_id,
             )
 
+        main_session = await self.runner.session_service.get_session(
+            app_name=self.app_name,
+            user_id=user_id,
+            session_id=user_id,
+        )
+        reminder_litellm_model = self._resolve_litellm_model_for_session_state(
+            main_session.state if main_session else None,
+            force_litellm_model=None,
+        )
+
         # Process through the agent using the existing message flow
         response = await self.process_message(
             user_id=user_id,
             message=prompt,
             session_id=effective_session_id,
+            force_litellm_model=reminder_litellm_model,
         )
 
         return response
@@ -441,6 +497,7 @@ async def process_message(
     user_id: str,
     message: str,
     session_id: str | None = None,
+    force_litellm_model: str | None = None,
 ) -> TelegramAgentReply:
     """Process a message through the ADK agent.
 
@@ -452,6 +509,7 @@ async def process_message(
         message: The message text to process.
         session_id: Optional session ID for conversation continuity.
             If not provided, user_id is used as session_id.
+        force_litellm_model: Optional LiteLLM model id override (see TelegramHandler).
 
     Returns:
         The agent's response text and optional Telegram document queue.
@@ -462,7 +520,10 @@ async def process_message(
     if _handler is None:
         raise RuntimeError("Handler not initialized. Call initialize_runner() first.")
     return await _handler.process_message(
-        user_id=user_id, message=message, session_id=session_id
+        user_id=user_id,
+        message=message,
+        session_id=session_id,
+        force_litellm_model=force_litellm_model,
     )
 
 

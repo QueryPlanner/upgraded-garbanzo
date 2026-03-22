@@ -20,10 +20,17 @@ from agent.telegram.bot import (
     create_application,
     handle_message,
     help_command,
+    model_command,
     reset_command,
     start_command,
+    tokens_command,
 )
 from agent.telegram.handler import TelegramAgentReply
+from agent.telegram_prefs import (
+    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
+    TELEGRAM_SESSION_PROVIDER_KEY,
+    TELEGRAM_USAGE_PROMPT_KEY,
+)
 from agent.utils.telegram_outbox import PendingTelegramFile
 
 
@@ -728,8 +735,8 @@ class TestCreateApplication:
 
             # Check that handlers are registered (stored in group 0 by default)
             handlers = app.handlers[0]
-            # start, help, reset, reminders, message handler
-            assert len(handlers) == 5
+            # start, help, reset, model, tokens, reminders, message
+            assert len(handlers) == 7
 
     def test_uses_app_for_initialization(self) -> None:
         """Test that app is used for initialization."""
@@ -773,6 +780,9 @@ class TestSetBotCommands:
         assert "start" in command_names
         assert "help" in command_names
         assert "reset" in command_names
+        assert "model" in command_names
+        assert "tokens" in command_names
+        assert "reminders" in command_names
 
 
 class TestRunBot:
@@ -802,6 +812,98 @@ class TestRunBot:
 
             assert result == 0
             mock_app.run_polling.assert_called_once()
+
+
+class TestSlashModelCommands:
+    """Tests for /model and /tokens slash commands."""
+
+    @staticmethod
+    def _handler_with_sessions() -> MagicMock:
+        from google.adk.sessions.in_memory_session_service import (
+            InMemorySessionService,
+        )
+
+        svc = InMemorySessionService()
+        mock_h = MagicMock()
+        mock_h.app_name = "agent"
+        mock_h.runner = MagicMock()
+        mock_h.runner.session_service = svc
+        return mock_h
+
+    @pytest.mark.asyncio
+    async def test_model_command_lists_models(
+        self, mock_update: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_h = self._handler_with_sessions()
+        await mock_h.runner.session_service.create_session(
+            app_name="agent",
+            user_id="12345",
+            session_id="12345",
+            state={
+                "user_id": "12345",
+                TELEGRAM_SESSION_PROVIDER_KEY: "openrouter",
+            },
+        )
+        ctx = MagicMock()
+        ctx.args = []
+        monkeypatch.delenv("ROOT_AGENT_MODEL", raising=False)
+
+        with patch("agent.telegram.bot.get_handler", return_value=mock_h):
+            await model_command(mock_update, ctx)
+
+        mock_update.message.reply_text.assert_called_once()
+        call = mock_update.message.reply_text.call_args
+        text = call.args[0] if call.args else call.kwargs.get("text", "")
+        assert "1." in text
+        assert "openrouter" in text
+        assert "z-ai/glm-4.7" in text
+
+    @pytest.mark.asyncio
+    async def test_model_command_sets_model(self, mock_update: MagicMock) -> None:
+        mock_h = self._handler_with_sessions()
+        await mock_h.runner.session_service.create_session(
+            app_name="agent",
+            user_id="12345",
+            session_id="12345",
+            state={
+                "user_id": "12345",
+                TELEGRAM_SESSION_PROVIDER_KEY: "openai",
+            },
+        )
+        ctx = MagicMock()
+        ctx.args = ["2"]
+
+        with patch("agent.telegram.bot.get_handler", return_value=mock_h):
+            await model_command(mock_update, ctx)
+
+        session = await mock_h.runner.session_service.get_session(
+            app_name="agent",
+            user_id="12345",
+            session_id="12345",
+        )
+        assert session is not None
+        assert session.state.get(TELEGRAM_SESSION_LITELLM_MODEL_KEY) == "openai/glm-5"
+
+    @pytest.mark.asyncio
+    async def test_tokens_command_shows_usage(self, mock_update: MagicMock) -> None:
+        mock_h = self._handler_with_sessions()
+        await mock_h.runner.session_service.create_session(
+            app_name="agent",
+            user_id="12345",
+            session_id="12345",
+            state={
+                "user_id": "12345",
+                TELEGRAM_USAGE_PROMPT_KEY: 42,
+            },
+        )
+        ctx = MagicMock()
+
+        with patch("agent.telegram.bot.get_handler", return_value=mock_h):
+            await tokens_command(mock_update, ctx)
+
+        call = mock_update.message.reply_text.call_args
+        text = call.args[0] if call.args else call.kwargs.get("text", "")
+        assert "42" in text
 
 
 class TestMain:
