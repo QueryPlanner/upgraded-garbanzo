@@ -23,12 +23,14 @@ name: adk-agent
 
 services:
   telegram-bot:
-    image: ${IMAGE}
+    # Build tags this image. For GHCR pull-only, use compose.image.yaml + IMAGE
+    # in .env — do not set IMAGE=ghcr.io/... here or Compose reuses that name.
+    image: adk-agent:current
     build: .
     environment:
       - AGENT_NAME=telegram-agent
       - LOG_LEVEL=INFO
-      # API keys and TELEGRAM_BOT_TOKEN loaded from .env
+      # Keys, TELEGRAM_BOT_TOKEN, OPENAI_API_BASE, DATABASE_URL, etc. from .env
     env_file:
       - .env
     volumes:

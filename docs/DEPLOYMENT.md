@@ -35,70 +35,40 @@ sudo ./setup.sh
 
 ## CI/CD with GitHub Actions
 
-This repository includes a GitHub Actions workflow that automatically:
-1.  **Builds** a multi-platform Docker image (**AMD64 & ARM64**) on every push.
-2.  **Validates** code quality via `ruff`, `mypy`, and `pytest` before building.
-3.  **Caches** build layers using GitHub Actions cache (`type=gha`) for ultra-fast rebuilds.
-4.  **Pushes** the image to **GitHub Container Registry (GHCR)**.
+On every push to **`main`**, after **code quality** (`ruff`, `mypy`, `pytest`) passes:
 
-### Using GHCR Images
+1. A **self-hosted** runner checks out the repo (with `clean: false` so a local **`.env`** is not deleted), then runs **`docker compose -f compose.yaml build`** and **`up -d`**. **`compose.yaml`** pins the image name to **`adk-agent:current`** — remove any legacy **`IMAGE=ghcr.io/...`** from `.env` when using this file so you are not still tied to an old registry tag. **`.env`** lives only on the host in the runner’s checkout (not from GitHub Actions secrets).
+2. Before each build, the workflow tags **`adk-agent:current` → `adk-agent:previous`** for rollback.
 
-Instead of building locally, you can pull the pre-built image from GHCR.
+Configure a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) on the same machine as Docker. **First run:** create `.env` in the runner’s repo directory (next to `compose.yaml`).
 
-1.  **Login to GHCR** (on your server):
-    ```bash
-    echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-    ```
-2.  **Pull the latest image**:
-    ```bash
-    docker pull ghcr.io/<your-org-or-username>/google-adk-on-bare-metal:main
-    ```
+**Rollback** (from that checkout):
 
-### Automatic Deployment
-
-To automate deployment, update your `compose.yaml` to use the GHCR image:
-
-```yaml
-services:
-  agent:
-    image: ghcr.io/<your-org-or-username>/google-adk-on-bare-metal:main
-    # ... rest of config
-```
-
-Then your update command becomes:
 ```bash
-docker compose pull && docker compose up -d
+docker tag adk-agent:previous adk-agent:current
+docker compose -f compose.yaml up -d
 ```
+
+### Optional: GHCR pull-only deploy
+
+Use **`compose.image.yaml`**, set **`IMAGE=ghcr.io/<org>/<repo>:<tag>`** in `.env`, then `docker compose pull && docker compose up -d`. Add your own workflow if you need automated GHCR builds.
 
 ### Server without a git clone (image only)
 
-The application runs **inside the image**; you do **not** need Python source on the VM. You still need a tiny directory with:
+The application runs **inside the image**; you do **not** need Python source on the VM. You still need:
 
-1. **`compose.image.yaml`** — copy from this repo (or download the same file from GitHub raw), and  
-2. **`.env`** — secrets and config (same variables as in CI: `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY` or `GOOGLE_API_KEY`, etc.).
-
-Set the image explicitly in `.env`:
+1. **`compose.image.yaml`** — copy from this repo (or GitHub raw), and  
+2. **`.env`** — secrets (`DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, API keys, etc.).
 
 ```bash
 IMAGE=ghcr.io/<your-org>/<your-repo>:main
-```
-
-Deploy or update:
-
-```bash
 docker compose -f compose.image.yaml pull
 docker compose -f compose.image.yaml up -d
 ```
 
-**Logs** do not require Compose or the repo — use the container name from `docker ps`:
+**Logs:** `docker logs -f --timestamps <container_name>` (see `docker ps`).
 
-```bash
-docker logs -f --timestamps <container_name>
-```
-
-Example: `docker logs -f --timestamps upgraded-garbanzo-telegram-bot-1`.
-
-If you use the default `compose.yaml` on a host that has **no** `Dockerfile`, Compose may try to build and fail; use **`compose.image.yaml`** on those hosts instead.
+If the host has **no** `Dockerfile`, use **`compose.image.yaml`** instead of `compose.yaml`.
 
 ---
 
