@@ -96,7 +96,7 @@ Set `TELEGRAM_LATENCY_LOG=1` in `.env` for two INFO lines: `telegram.pre_llm_lat
 
 ### Session Persistence
 
-The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set and `ADK_USE_DATABASE_SESSION` is true (default), ADK conversation sessions are persisted in Postgres and survive restarts. Set `ADK_USE_DATABASE_SESSION=false` to use **in-memory** ADK sessions (no Postgres latency per message). For deployed bots, set the same variable in your host or **GitHub Actions environment** (or deployment secrets) so it is injected at runtime without committing `.env`.
+The Telegram bot uses the same session storage as the server. When `DATABASE_URL` (or `AGENT_ENGINE`) is set and `ADK_USE_DATABASE_SESSION` is true (default), ADK conversation sessions are persisted in Postgres and survive restarts. Set `ADK_USE_DATABASE_SESSION=false` to use **in-memory** ADK sessions (no Postgres latency per message). For deployed bots, set the same variable in the server **`.env`** (used by Docker Compose / the self-hosted deploy job) without committing `.env`.
 
 ### Data Persistence (Reminders & Fitness)
 
@@ -153,4 +153,4 @@ When asked to write or modify tests, you **MUST** adhere to the following strict
 
 ### Deployment
 *   **Containerization:** The `Dockerfile` provides a multi-stage build optimized for production.
-*   **CI/CD:** GitHub Actions workflows (`.github/workflows/`) handle testing, linting, and publishing Docker images to GHCR.
+*   **CI/CD:** GitHub Actions runs tests and lint on PRs/pushes; on `main`, a self-hosted runner builds and deploys with `docker compose` on the server (see `docs/DEPLOYMENT.md`).

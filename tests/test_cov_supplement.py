@@ -756,6 +756,72 @@ class TestBotExtraBranches:
             await asyncio.sleep(0)
 
     @pytest.mark.asyncio
+    async def test_slash_model_tokens_edge_branches(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        from google.adk.sessions.in_memory_session_service import (
+            InMemorySessionService,
+        )
+
+        from agent.telegram.bot import model_command, tokens_command
+        from agent.telegram.session_state import merge_session_state_delta
+        from agent.telegram_prefs import TELEGRAM_USAGE_PROMPT_KEY
+
+        svc = InMemorySessionService()
+        mock_h = MagicMock()
+        mock_h.app_name = "agent"
+        mock_h.runner = MagicMock()
+        mock_h.runner.session_service = svc
+
+        upd_nm = MagicMock()
+        upd_nm.message = None
+        await model_command(upd_nm, mock_context)
+
+        mock_context.args = []
+        with patch("agent.telegram.bot.get_handler", return_value=None):
+            await model_command(mock_update, mock_context)
+        assert "initialized" in mock_update.message.reply_text.call_args[0][0].lower()
+
+        await svc.create_session(
+            app_name="agent",
+            user_id="1",
+            session_id="1",
+            state={"user_id": "1"},
+        )
+        mock_context.args = ["bad"]
+        with (
+            patch("agent.telegram.bot.get_handler", return_value=mock_h),
+            patch(
+                "agent.telegram.bot.resolve_model_freeform",
+                return_value=(None, None),
+            ),
+        ):
+            await model_command(mock_update, mock_context)
+        assert "Invalid model" in mock_update.message.reply_text.call_args[0][0]
+
+        mock_update.message.reply_text.reset_mock()
+        with patch("agent.telegram.bot.get_handler", return_value=None):
+            await tokens_command(mock_update, mock_context)
+        assert "initialized" in mock_update.message.reply_text.call_args[0][0].lower()
+
+        upd_nt = MagicMock()
+        upd_nt.message = None
+        await tokens_command(upd_nt, mock_context)
+
+        await merge_session_state_delta(
+            svc,
+            app_name="agent",
+            user_id="1",
+            session_id="1",
+            state_delta={TELEGRAM_USAGE_PROMPT_KEY: "not-int"},
+        )
+        mock_update.message.reply_text.reset_mock()
+        with patch("agent.telegram.bot.get_handler", return_value=mock_h):
+            await tokens_command(mock_update, mock_context)
+        txt = mock_update.message.reply_text.call_args[0][0]
+        assert "Prompt tokens" in txt
+
+    @pytest.mark.asyncio
     async def test_error_handler_branches(self) -> None:
         from telegram import Update
         from telegram.error import NetworkError, TimedOut

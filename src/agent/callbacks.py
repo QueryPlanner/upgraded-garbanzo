@@ -16,6 +16,12 @@ from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import ToolContext
 from google.adk.tools.base_tool import BaseTool
 
+from .telegram_prefs import (
+    TELEGRAM_USAGE_COMPLETION_KEY,
+    TELEGRAM_USAGE_PROMPT_KEY,
+    TELEGRAM_USAGE_TOTAL_KEY,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +48,32 @@ def _llm_usage_token_counts(
     )
     total = _coerce_non_negative_int(getattr(usage, "total_token_count", None))
     return prompt, completion, total
+
+
+def _accumulate_telegram_session_tokens(
+    callback_context: CallbackContext,
+    llm_response: LlmResponse,
+) -> None:
+    """Sum LLM usage into session state when ``user_id`` is present (Telegram)."""
+    if not callback_context.state.get("user_id"):
+        return
+
+    prompt_t, completion_t, total_t = _llm_usage_token_counts(llm_response)
+    if prompt_t is None and completion_t is None and total_t is None:
+        return
+
+    state = callback_context.state
+
+    def add_to_key(key: str, delta: int | None) -> None:
+        if delta is None:
+            return
+        previous_raw = state.get(key)
+        previous = int(previous_raw) if previous_raw is not None else 0
+        state[key] = previous + delta
+
+    add_to_key(TELEGRAM_USAGE_PROMPT_KEY, prompt_t)
+    add_to_key(TELEGRAM_USAGE_COMPLETION_KEY, completion_t)
+    add_to_key(TELEGRAM_USAGE_TOTAL_KEY, total_t)
 
 
 def _log_llm_call_metrics(
@@ -248,6 +280,7 @@ class LoggingCallbacks:
             completion_tokens=completion_t,
             total_tokens=total_t,
         )
+        _accumulate_telegram_session_tokens(callback_context, llm_response)
 
         return None
 

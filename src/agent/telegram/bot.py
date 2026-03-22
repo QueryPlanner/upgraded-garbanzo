@@ -42,15 +42,31 @@ load_dotenv()
 
 from ..agent import app  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
+from ..telegram_prefs import (  # noqa: E402
+    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
+    TELEGRAM_SESSION_PROVIDER_KEY,
+    TELEGRAM_USAGE_COMPLETION_KEY,
+    TELEGRAM_USAGE_PROMPT_KEY,
+    TELEGRAM_USAGE_TOTAL_KEY,
+)
 from ..utils.session import create_session_service_for_runner  # noqa: E402
 from ..utils.telegram_outbox import PendingTelegramFile  # noqa: E402
 from .handler import (  # noqa: E402
+    _read_litellm_model_from_state,
     get_handler,
     initialize_runner,
     process_message,
     reset_session,
 )
+from .model_settings import (  # noqa: E402
+    default_root_model,
+    format_flat_model_menu,
+    infer_provider_from_model_id,
+    resolve_flat_menu_index,
+    resolve_model_freeform,
+)
 from .notifications import get_notification_service  # noqa: E402
+from .session_state import merge_session_state_delta  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +94,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/start - Show this welcome message\n"
         "/help - Get help\n"
         "/reset - Clear conversation and start fresh\n"
+        "/model - List models or pick by number (e.g. /model 3)\n"
+        "/tokens - Show session token usage\n"
         "/reminders - List your scheduled reminders\n\n"
         "*Reminders:* Ask me to remind you about things!\n"
         'Examples: "Remind me in 30 minutes to take a break" or '
@@ -100,6 +118,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start - Restart the bot\n"
         "/help - Show this help message\n"
         "/reset - Clear conversation and start fresh\n"
+        "/model - Numbered list; set with /model N or a full model id\n"
+        "/tokens - Cumulative tokens for this chat session\n"
         "/reminders - List your scheduled reminders\n\n"
         "*Reminders:*\n"
         "You can ask me to set reminders like:\n"
@@ -127,6 +147,118 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(
             "❌ Failed to reset session. Please try again.",
         )
+
+
+async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List or set the LiteLLM model for this chat (session-scoped)."""
+    if not update.message or not update.effective_user:
+        return
+
+    handler = get_handler()
+    if handler is None:
+        await update.message.reply_text(
+            "❌ Bot is not fully initialized. Try again later."
+        )
+        return
+
+    user_id = str(update.effective_user.id)
+    session = await handler.runner.session_service.get_session(
+        app_name=handler.app_name,
+        user_id=user_id,
+        session_id=user_id,
+    )
+    state = dict(session.state) if session is not None else {}
+
+    args = context.args or []
+    if not args:
+        override = _read_litellm_model_from_state(state)
+        active = override if override is not None else default_root_model()
+        body = (
+            f"*Active model:* `{active}`\n"
+            f"*Env default:* `{default_root_model()}`\n\n"
+            "*Models (reply with `/model N` or a full id):*\n"
+            f"{format_flat_model_menu()}\n\n"
+            "_Short ids like `z-ai/glm-4.7` also work._"
+        )
+        await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    arg = " ".join(args).strip()
+    if arg.isdigit():
+        full_id, error_message = resolve_flat_menu_index(int(arg))
+    else:
+        full_id, error_message = resolve_model_freeform(arg)
+    if error_message is not None or full_id is None:
+        await update.message.reply_text(f"❌ {error_message or 'Invalid model.'}")
+        return
+
+    state_delta: dict[str, str] = {TELEGRAM_SESSION_LITELLM_MODEL_KEY: full_id}
+    inferred = infer_provider_from_model_id(full_id)
+    if inferred is not None:
+        state_delta[TELEGRAM_SESSION_PROVIDER_KEY] = inferred
+
+    await merge_session_state_delta(
+        handler.runner.session_service,
+        app_name=handler.app_name,
+        user_id=user_id,
+        session_id=user_id,
+        state_delta=state_delta,
+    )
+
+    await update.message.reply_text(
+        f"✅ Model set to `{full_id}`",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show cumulative token usage for this chat session (when the API reports it)."""
+    if not update.message or not update.effective_user:
+        return
+
+    handler = get_handler()
+    if handler is None:
+        await update.message.reply_text(
+            "❌ Bot is not fully initialized. Try again later."
+        )
+        return
+
+    user_id = str(update.effective_user.id)
+    session = await handler.runner.session_service.get_session(
+        app_name=handler.app_name,
+        user_id=user_id,
+        session_id=user_id,
+    )
+    state = dict(session.state) if session is not None else {}
+
+    def _as_int(key: str) -> int:
+        raw = state.get(key)
+        if raw is None:
+            return 0
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    prompt_n = _as_int(TELEGRAM_USAGE_PROMPT_KEY)
+    completion_n = _as_int(TELEGRAM_USAGE_COMPLETION_KEY)
+    total_n = _as_int(TELEGRAM_USAGE_TOTAL_KEY)
+    override = _read_litellm_model_from_state(state)
+    active_model = override if override is not None else default_root_model()
+
+    lines = [
+        "📊 *Session token usage*",
+        "_Totals accrue per LLM turn when the provider returns usage metadata._",
+        "",
+        f"Prompt tokens: *{prompt_n}*",
+        f"Completion tokens: *{completion_n}*",
+        f"Total (as reported): *{total_n}*",
+        "",
+        f"Active model: `{active_model}`",
+        "",
+        "Use `/reset` to clear the chat and these counters.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -472,6 +604,8 @@ def create_application(token: str) -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("reset", reset_command))
+    application.add_handler(CommandHandler("model", model_command))
+    application.add_handler(CommandHandler("tokens", tokens_command))
     application.add_handler(CommandHandler("reminders", reminders_command))
 
     # Add message handler for text messages
@@ -499,6 +633,8 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("start", "Show welcome message"),
         BotCommand("help", "Display help information"),
         BotCommand("reset", "Clear conversation and start fresh"),
+        BotCommand("model", "List models or set by number"),
+        BotCommand("tokens", "Session token usage"),
         BotCommand("reminders", "List your scheduled reminders"),
     ]
     await application.bot.set_my_commands(commands)

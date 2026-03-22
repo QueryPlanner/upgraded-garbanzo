@@ -5,11 +5,32 @@ import pytest
 from agent.litellm_config import build_litellm_kwargs
 
 
-def test_openrouter_requires_key() -> None:
+def test_openrouter_requires_key_or_proxy_credentials() -> None:
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         build_litellm_kwargs(
             "openrouter/google/gemini-2.0-flash-001",
-            environ={"OPENROUTER_API_KEY": ""},
+            environ={},
+        )
+
+
+def test_openrouter_via_openai_compatible_proxy_without_openrouter_key() -> None:
+    kwargs = build_litellm_kwargs(
+        "openrouter/z-ai/glm-4.7",
+        environ={
+            "OPENAI_API_KEY": "sk-proxy",
+            "OPENAI_API_BASE": "http://localhost:4000/",
+        },
+    )
+    assert kwargs["model"] == "openrouter/z-ai/glm-4.7"
+    assert kwargs["api_key"] == "sk-proxy"
+    assert kwargs["api_base"] == "http://localhost:4000"
+
+
+def test_openrouter_openai_key_without_base_raises() -> None:
+    with pytest.raises(ValueError, match="OPENAI_API_BASE"):
+        build_litellm_kwargs(
+            "openrouter/z-ai/glm-4.7",
+            environ={"OPENAI_API_KEY": "sk-only"},
         )
 
 

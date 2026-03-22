@@ -33,21 +33,45 @@ def build_litellm_kwargs(
 
     if lowered.startswith("openrouter/"):
         openrouter_key = _env_nonempty(env, "OPENROUTER_API_KEY")
-        if not openrouter_key:
-            raise ValueError("OPENROUTER_API_KEY is required for OpenRouter models")
-        litellm_kwargs["api_key"] = openrouter_key
-        logger.info("Configuring OpenRouter model: %s", model_name)
+        if openrouter_key:
+            litellm_kwargs["api_key"] = openrouter_key
+            logger.info("Configuring OpenRouter model: %s", model_name)
 
-        provider_order = _env_nonempty(env, "OPENROUTER_PROVIDER_ORDER")
-        if provider_order:
-            try:
-                litellm_kwargs["extra_body"] = {
-                    "provider": {"order": json.loads(provider_order)}
-                }
-                logger.info("OpenRouter provider order: %s", provider_order)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Invalid OPENROUTER_PROVIDER_ORDER JSON: %s", provider_order
+            provider_order = _env_nonempty(env, "OPENROUTER_PROVIDER_ORDER")
+            if provider_order:
+                try:
+                    litellm_kwargs["extra_body"] = {
+                        "provider": {"order": json.loads(provider_order)}
+                    }
+                    logger.info("OpenRouter provider order: %s", provider_order)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Invalid OPENROUTER_PROVIDER_ORDER JSON: %s", provider_order
+                    )
+        else:
+            openai_base = _env_nonempty(env, "OPENAI_API_BASE") or _env_nonempty(
+                env, "OPENAI_BASE_URL"
+            )
+            openai_key = _env_nonempty(env, "OPENAI_API_KEY")
+            if openai_key and openai_base:
+                litellm_kwargs["api_key"] = openai_key
+                litellm_kwargs["api_base"] = openai_base.rstrip("/")
+                logger.info(
+                    "OpenRouter model id via OpenAI-compatible base "
+                    "(no OPENROUTER_API_KEY): %s → %s",
+                    model_name,
+                    litellm_kwargs["api_base"],
+                )
+            elif not openai_key:
+                raise ValueError(
+                    "OPENROUTER_API_KEY is required for api.openrouter.ai, or set "
+                    "OPENAI_API_KEY plus OPENAI_API_BASE for a LiteLLM (or other) "
+                    "proxy that accepts openrouter/… model names."
+                )
+            else:
+                raise ValueError(
+                    "OPENROUTER_API_KEY is missing and OPENAI_API_BASE is not set; "
+                    "add OPENROUTER_API_KEY or set OPENAI_API_BASE to your proxy URL."
                 )
 
     elif lowered.startswith("gemini") or lowered.startswith("google"):

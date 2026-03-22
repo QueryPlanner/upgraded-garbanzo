@@ -343,6 +343,102 @@ class TestModelCallbacks:
         assert "completion_tokens" not in caplog.text
         assert "total_tokens" not in caplog.text
 
+    def test_after_model_accumulates_telegram_tokens_when_user_id_in_state(
+        self,
+        mock_logging_callback_context: MockLoggingCallbackContext,
+        mock_llm_request: MockLlmRequest,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Telegram sessions store cumulative usage in session state."""
+        from agent.telegram_prefs import (
+            TELEGRAM_USAGE_COMPLETION_KEY,
+            TELEGRAM_USAGE_PROMPT_KEY,
+            TELEGRAM_USAGE_TOTAL_KEY,
+        )
+
+        state = MockState({"user_id": "tg-1"})
+        ctx = MockLoggingCallbackContext(state=state)
+        clock = iter([0.0, 1.0])
+        monkeypatch.setattr("agent.callbacks.perf_counter", lambda: next(clock))
+
+        callbacks = LoggingCallbacks()
+        llm_response = MockLlmResponse(
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=10,
+                candidates_token_count=5,
+                total_token_count=15,
+            ),
+        )
+        callbacks.before_model(ctx, mock_llm_request)  # type: ignore
+        callbacks.after_model(ctx, llm_response)  # type: ignore
+
+        assert state[TELEGRAM_USAGE_PROMPT_KEY] == 10
+        assert state[TELEGRAM_USAGE_COMPLETION_KEY] == 5
+        assert state[TELEGRAM_USAGE_TOTAL_KEY] == 15
+
+        clock2 = iter([0.0, 1.0])
+        monkeypatch.setattr("agent.callbacks.perf_counter", lambda: next(clock2))
+        callbacks.before_model(ctx, mock_llm_request)  # type: ignore
+        callbacks.after_model(ctx, llm_response)  # type: ignore
+
+        assert state[TELEGRAM_USAGE_PROMPT_KEY] == 20
+        assert state[TELEGRAM_USAGE_COMPLETION_KEY] == 10
+        assert state[TELEGRAM_USAGE_TOTAL_KEY] == 30
+
+    def test_after_model_skips_telegram_usage_without_user_id(
+        self,
+        mock_logging_callback_context: MockLoggingCallbackContext,
+        mock_llm_request: MockLlmRequest,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from agent.telegram_prefs import TELEGRAM_USAGE_PROMPT_KEY
+
+        state = MockState({})
+        ctx = MockLoggingCallbackContext(state=state)
+        monkeypatch.setattr("agent.callbacks.perf_counter", lambda: 0.0)
+        callbacks = LoggingCallbacks()
+        llm_response = MockLlmResponse(
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=9,
+                candidates_token_count=1,
+                total_token_count=10,
+            ),
+        )
+        callbacks.before_model(ctx, mock_llm_request)  # type: ignore
+        callbacks.after_model(ctx, llm_response)  # type: ignore
+
+        assert TELEGRAM_USAGE_PROMPT_KEY not in state.to_dict()
+
+    def test_after_model_partial_usage_still_accumulates_prompt_only(
+        self,
+        mock_llm_request: MockLlmRequest,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When only some usage fields exist, add_to_key early-returns for None."""
+        from agent.telegram_prefs import (
+            TELEGRAM_USAGE_COMPLETION_KEY,
+            TELEGRAM_USAGE_PROMPT_KEY,
+            TELEGRAM_USAGE_TOTAL_KEY,
+        )
+
+        state = MockState({"user_id": "tg-2"})
+        ctx = MockLoggingCallbackContext(state=state)
+        monkeypatch.setattr("agent.callbacks.perf_counter", lambda: 0.0)
+        callbacks = LoggingCallbacks()
+        llm_response = MockLlmResponse(
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=4,
+                candidates_token_count=None,
+                total_token_count=None,
+            ),
+        )
+        callbacks.before_model(ctx, mock_llm_request)  # type: ignore
+        callbacks.after_model(ctx, llm_response)  # type: ignore
+
+        assert state[TELEGRAM_USAGE_PROMPT_KEY] == 4
+        assert TELEGRAM_USAGE_COMPLETION_KEY not in state.to_dict()
+        assert TELEGRAM_USAGE_TOTAL_KEY not in state.to_dict()
+
 
 class TestToolCallbacks:
     """Tests for tool invocation callbacks (before_tool and after_tool)."""
