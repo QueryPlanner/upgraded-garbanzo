@@ -35,40 +35,24 @@ sudo ./setup.sh
 
 ## CI/CD with GitHub Actions
 
-This repository includes a GitHub Actions workflow that automatically:
-1.  **Builds** a multi-platform Docker image (**AMD64 & ARM64**) on every push.
-2.  **Validates** code quality via `ruff`, `mypy`, and `pytest` before building.
-3.  **Caches** build layers using GitHub Actions cache (`type=gha`) for ultra-fast rebuilds.
-4.  **Pushes** the image to **GitHub Container Registry (GHCR)**.
+On every push to **`main`**, after **code quality** (`ruff`, `mypy`, `pytest`) passes:
 
-### Using GHCR Images
+1. A **self-hosted** runner checks out the repo (with `clean: false` so a local **`.env`** is not deleted), then runs **`docker compose -f compose.yaml build`** and **`up -d`**. **`.env` lives only on the host** in the runner’s work directory — it is **not** generated from GitHub Actions secrets.
+2. Before each build, the workflow tags the last good image **`adk-agent:current` → `adk-agent:previous`** so you can roll back in one command (see below).
 
-Instead of building locally, you can pull the pre-built image from GHCR.
+Configure a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) on the same machine that runs Docker; install Docker and the Compose plugin for that user. **First time:** create `.env` in the runner’s checkout path for this repo (same folder as `compose.yaml`); that path is usually under `actions-runner/_work/<repo>/<repo>/` unless you customize the runner layout.
 
-1.  **Login to GHCR** (on your server):
-    ```bash
-    echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-    ```
-2.  **Pull the latest image**:
-    ```bash
-    docker pull ghcr.io/<your-org-or-username>/google-adk-on-bare-metal:main
-    ```
+**Rollback** (on the server):
 
-### Automatic Deployment
-
-To automate deployment, update your `compose.yaml` to use the GHCR image:
-
-```yaml
-services:
-  agent:
-    image: ghcr.io/<your-org-or-username>/google-adk-on-bare-metal:main
-    # ... rest of config
-```
-
-Then your update command becomes:
 ```bash
-docker compose pull && docker compose up -d
+cd /path/to/repo/checkout   # or your fixed clone path
+docker tag adk-agent:previous adk-agent:current
+docker compose -f compose.yaml up -d
 ```
+
+### Optional: GHCR pull-only deploy
+
+If you prefer a registry image instead of building on the server, use **`compose.image.yaml`**, set `IMAGE=ghcr.io/<org>/<repo>:<tag>` in `.env`, and run `docker compose pull && docker compose up -d`. The default CI workflow does **not** push to GHCR on `main`; add a separate workflow if you need automated registry publishes.
 
 ### Server without a git clone (image only)
 

@@ -13,7 +13,10 @@ from google.genai import types
 from agent.telegram.handler import (
     REMINDER_PROMPT_TEMPLATE,
     REMINDER_SESSION_SUFFIX,
+    TelegramAgentReply,
     TelegramHandler,
+    _read_litellm_model_from_state,
+    _telegram_litellm_model_context,
     get_handler,
     initialize_runner,
     process_message,
@@ -731,6 +734,94 @@ class TestGetHandler:
 
         assert result is not None
         assert isinstance(result, TelegramHandler)
+
+
+class TestTelegramLitellmSessionHelpers:
+    """Session model resolution and context var behavior."""
+
+    def test_read_litellm_model_strips_and_rejects_blank(self) -> None:
+        assert _read_litellm_model_from_state({"telegram_litellm_model": "  "}) is None
+        assert (
+            _read_litellm_model_from_state({"telegram_litellm_model": " openai/x "})
+            == "openai/x"
+        )
+
+    @pytest.mark.asyncio
+    async def test_litellm_model_context_restores_previous_value(self) -> None:
+        from agent.litellm_session_router import CURRENT_TELEGRAM_LITELLM_MODEL
+
+        outer = CURRENT_TELEGRAM_LITELLM_MODEL.set("prev")
+        try:
+            async with _telegram_litellm_model_context("during"):
+                assert CURRENT_TELEGRAM_LITELLM_MODEL.get() == "during"
+            assert CURRENT_TELEGRAM_LITELLM_MODEL.get() == "prev"
+        finally:
+            CURRENT_TELEGRAM_LITELLM_MODEL.reset(outer)
+
+    def test_resolve_litellm_model_prefers_force_over_state(
+        self, mock_agent: MagicMock
+    ) -> None:
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        assert (
+            handler._resolve_litellm_model_for_session_state(
+                {"telegram_litellm_model": "openai/glm-5"},
+                force_litellm_model="openai/glm-4.7",
+            )
+            == "openai/glm-4.7"
+        )
+
+    def test_resolve_litellm_model_reads_session_state(
+        self, mock_agent: MagicMock
+    ) -> None:
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        assert (
+            handler._resolve_litellm_model_for_session_state(
+                {"telegram_litellm_model": "openai/glm-5"},
+                force_litellm_model=None,
+            )
+            == "openai/glm-5"
+        )
+
+    def test_resolve_litellm_model_env_fallback(
+        self, mock_agent: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ROOT_AGENT_MODEL", raising=False)
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        assert (
+            handler._resolve_litellm_model_for_session_state(
+                {},
+                force_litellm_model=None,
+            )
+            == "gemini-2.5-flash"
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_reminder_passes_main_chat_model_as_force(
+        self, mock_agent: MagicMock
+    ) -> None:
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        main_sess = MagicMock()
+        main_sess.state = {"telegram_litellm_model": "openai/glm-5"}
+
+        mock_pm = AsyncMock(return_value=TelegramAgentReply(text="ok"))
+
+        with (
+            patch.object(
+                handler.runner.session_service,
+                "get_session",
+                new_callable=AsyncMock,
+                return_value=main_sess,
+            ),
+            patch.object(handler, "process_message", mock_pm),
+        ):
+            await handler.process_reminder(
+                user_id="user-1",
+                reminder_message="ping",
+                scheduled_time=datetime.now(UTC),
+            )
+
+        mock_pm.assert_called_once()
+        assert mock_pm.call_args.kwargs["force_litellm_model"] == "openai/glm-5"
 
 
 class TestReminderPromptTemplate:

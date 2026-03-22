@@ -1,114 +1,57 @@
-name: Docker Publish
+name: CI and server deploy
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
+    branches: ["main"]
+    tags: ["v*.*.*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
+# Local image tags on the self-hosted runner (rollback: docker tag adk-agent:previous
+# adk-agent:current && docker compose up -d).
 env:
-  REGISTRY: ghcr.io
+  DEPLOY_IMAGE: adk-agent:current
+  DEPLOY_IMAGE_PREVIOUS: adk-agent:previous
 
 jobs:
-  # Run Code Quality on PRs and pushes
   quality:
     uses: ./.github/workflows/code-quality.yml
 
-  # Build and Push only on main branch pushes (not PRs)
-  build:
+  deploy:
     needs: quality
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Downcase IMAGE_NAME
-        run: |
-          echo "IMAGE_NAME=${GITHUB_REPOSITORY@L}" >> "${GITHUB_ENV}"
-
-      # Multi-platform support (qemu + buildx)
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log into registry ${{ env.REGISTRY }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha,format=long
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push Docker image
-        id: build-push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          # Multi-platform builds for Bare Metal (ARM64 for Pis, AMD64 for Cloud)
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          # Borrowed high-perf caching
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy:
-    needs: build
     runs-on: self-hosted
     steps:
+      # clean: false keeps a gitignored .env on the host between runs (same work dir).
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Log into GitHub Container Registry
-        uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          clean: false
 
-      - name: Create .env file
+      - name: Enable BuildKit
         run: |
-          cat <<EOF > .env
-          AGENT_NAME=telegram-agent
-          COMPOSE_PROJECT_NAME=adk-agent
-          IMAGE=ghcr.io/${GITHUB_REPOSITORY@L}:main
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
-          GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-          ROOT_AGENT_MODEL=${{ secrets.ROOT_AGENT_MODEL }}
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
-          LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}
-          LOG_LEVEL=INFO
-          ADK_USE_DATABASE_SESSION=false
-          EOF
+          echo "DOCKER_BUILDKIT=1" >> "${GITHUB_ENV}"
+          echo "COMPOSE_DOCKER_CLI_BUILD=1" >> "${GITHUB_ENV}"
 
-      - name: Pull and Deploy
+      - name: Require host .env (not from GitHub secrets)
         run: |
-          export IMAGE="ghcr.io/${GITHUB_REPOSITORY@L}:main"
-          docker compose -f compose.image.yaml pull
-          docker compose -f compose.image.yaml up -d
+          if [[ ! -f .env ]]; then
+            echo "::error::Missing .env in the runner workspace ($PWD). Create it once on this host"
+            echo "(copy from .env.example). Deploy does not inject repo secrets."
+            exit 1
+          fi
+
+      - name: Retag current image as previous (rollback slot)
+        run: |
+          if docker image inspect "${{ env.DEPLOY_IMAGE }}" >/dev/null 2>&1; then
+            docker tag "${{ env.DEPLOY_IMAGE }}" "${{ env.DEPLOY_IMAGE_PREVIOUS }}"
+            echo "Saved ${{ env.DEPLOY_IMAGE }} -> ${{ env.DEPLOY_IMAGE_PREVIOUS }}"
+          else
+            echo "No existing ${{ env.DEPLOY_IMAGE }} (first deploy)"
+          fi
+
+      - name: Build and deploy on host
+        run: |
+          docker compose -f compose.yaml build
+          docker compose -f compose.yaml up -d
           docker image prune -f

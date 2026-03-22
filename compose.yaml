@@ -23,12 +23,13 @@ name: adk-agent
 
 services:
   telegram-bot:
-    image: ${IMAGE}
+    # CI sets IMAGE; local default matches self-hosted deploy tags.
+    image: ${IMAGE:-adk-agent:current}
     build: .
     environment:
       - AGENT_NAME=telegram-agent
       - LOG_LEVEL=INFO
-      # API keys and TELEGRAM_BOT_TOKEN loaded from .env
+      # Keys, TELEGRAM_BOT_TOKEN, OPENAI_API_BASE, DATABASE_URL, etc. from .env
     env_file:
       - .env
     volumes:
