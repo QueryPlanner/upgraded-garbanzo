@@ -1,6 +1,7 @@
 """Unit tests for the LoggingCallbacks class in the agent.logging_callbacks module."""
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -219,6 +220,8 @@ class TestModelCallbacks:
             "LLM response: {'text': 'The answer is 42', 'confidence': 0.95}"
             in caplog.text
         )
+        assert "llm.metrics" in caplog.text
+        assert "duration_s=n/a" in caplog.text
 
     def test_after_model_without_llm_content(
         self,
@@ -236,6 +239,109 @@ class TestModelCallbacks:
         assert result is None
         assert "*** After LLM call" in caplog.text
         assert "LLM response:" not in caplog.text
+        assert "llm.metrics" in caplog.text
+        assert "duration_s=n/a" in caplog.text
+
+    def test_llm_metrics_with_duration_and_token_rates(
+        self,
+        mock_logging_callback_context: MockLoggingCallbackContext,
+        mock_llm_request: MockLlmRequest,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Paired before/after model + usage_metadata yields tokens/sec in logs."""
+        caplog.set_level(logging.INFO)
+        callbacks = LoggingCallbacks()
+        clock = iter([1000.0, 1000.5])
+
+        def _fake_perf_counter() -> float:
+            return next(clock)
+
+        monkeypatch.setattr(
+            "agent.callbacks.perf_counter",
+            _fake_perf_counter,
+        )
+
+        llm_response = MockLlmResponse(
+            content=MockContent({"text": "ok"}),
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=100,
+                candidates_token_count=50,
+                total_token_count=150,
+            ),
+        )
+
+        callbacks.before_model(mock_logging_callback_context, mock_llm_request)  # type: ignore
+        callbacks.after_model(mock_logging_callback_context, llm_response)  # type: ignore
+
+        assert "llm.metrics" in caplog.text
+        assert "duration_s=0.500" in caplog.text
+        assert "output_tokens_per_s=100.00" in caplog.text
+        assert "total_tokens_per_s=300.00" in caplog.text
+        assert "prompt_tokens=100" in caplog.text
+        assert "completion_tokens=50" in caplog.text
+        assert "total_tokens=150" in caplog.text
+
+    def test_llm_metrics_zero_duration_omits_token_rates(
+        self,
+        mock_logging_callback_context: MockLoggingCallbackContext,
+        mock_llm_request: MockLlmRequest,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If wall-clock delta is zero, do not emit tokens/sec (avoid div by zero)."""
+
+        def _same_clock() -> float:
+            return 1.0
+
+        monkeypatch.setattr("agent.callbacks.perf_counter", _same_clock)
+
+        caplog.set_level(logging.INFO)
+        callbacks = LoggingCallbacks()
+        llm_response = MockLlmResponse(
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=1,
+                candidates_token_count=2,
+                total_token_count=3,
+            ),
+        )
+        callbacks.before_model(mock_logging_callback_context, mock_llm_request)  # type: ignore
+        callbacks.after_model(mock_logging_callback_context, llm_response)  # type: ignore
+
+        assert "duration_s=0.000" in caplog.text
+        assert "output_tokens_per_s" not in caplog.text
+        assert "total_tokens_per_s" not in caplog.text
+
+    def test_llm_metrics_invalid_usage_counts_treated_as_absent(
+        self,
+        mock_logging_callback_context: MockLoggingCallbackContext,
+        mock_llm_request: MockLlmRequest,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        clock = iter([0.0, 1.0])
+
+        monkeypatch.setattr(
+            "agent.callbacks.perf_counter",
+            lambda: next(clock),
+        )
+
+        caplog.set_level(logging.INFO)
+        callbacks = LoggingCallbacks()
+        llm_response = MockLlmResponse(
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=["unusable"],
+                candidates_token_count=-1,
+                total_token_count=None,
+            ),
+        )
+        callbacks.before_model(mock_logging_callback_context, mock_llm_request)  # type: ignore
+        callbacks.after_model(mock_logging_callback_context, llm_response)  # type: ignore
+
+        assert "llm.metrics" in caplog.text
+        assert "prompt_tokens" not in caplog.text
+        assert "completion_tokens" not in caplog.text
+        assert "total_tokens" not in caplog.text
 
 
 class TestToolCallbacks:
@@ -459,9 +565,9 @@ class TestWalrusOperators:
         Tests all 7 walrus operator usages in LoggingCallbacks:
         1. before_agent (line 80): user_content assignment
         2. after_agent (line 103): user_content assignment
-        3. before_model (line 132): user_content assignment
-        4. after_model (line 166): user_content assignment
-        5. after_model (line 170): llm_content assignment
+        3. before_model: user_content assignment
+        4. after_model: user_content assignment
+        5. after_model: llm_content assignment
         6. before_tool (line 201): user_content assignment (as 'content')
         7. after_tool (line 239): user_content assignment (as 'content')
         """

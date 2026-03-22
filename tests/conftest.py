@@ -163,9 +163,14 @@ class MockLlmRequest:
 class MockLlmResponse:
     """Mock LlmResponse for model callbacks."""
 
-    def __init__(self, content: MockContent | None = None) -> None:
+    def __init__(
+        self,
+        content: MockContent | None = None,
+        usage_metadata: Any | None = None,
+    ) -> None:
         """Initialize mock LLM response."""
         self.content = content
+        self.usage_metadata = usage_metadata
 
 
 class MockEventActions:
