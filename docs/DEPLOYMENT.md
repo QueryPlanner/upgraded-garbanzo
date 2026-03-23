@@ -33,19 +33,23 @@ sudo ./setup.sh
 
 ---
 
-## CI/CD with GitHub Actions
+## CI with GitHub Actions
 
-On every push to **`main`**, after **code quality** (`ruff`, `mypy`, `pytest`) passes:
+Pushes and pull requests to **`main`** (and version tags) run **code quality** only: `ruff`, `mypy`, and `pytest` via `.github/workflows/docker-publish.yml` calling `code-quality.yml`. **Nothing is deployed from CI** — you update the server yourself when ready.
 
-1. A **self-hosted** runner checks out the repo (with `clean: false` so a local **`.env`** is not deleted), then runs **`docker compose -f compose.yaml build`** and **`up -d`**. **`.env` lives only on the host** in the runner’s work directory — it is **not** generated from GitHub Actions secrets.
-2. Before each build, the workflow tags the last good image **`adk-agent:current` → `adk-agent:previous`** so you can roll back in one command (see below).
+## Manual deploy (recommended)
 
-Configure a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) on the same machine that runs Docker; install Docker and the Compose plugin for that user. **First time:** create `.env` in the runner’s checkout path for this repo (same folder as `compose.yaml`); that path is usually under `actions-runner/_work/<repo>/<repo>/` unless you customize the runner layout.
-
-**Rollback** (on the server):
+On the machine that runs Docker, from your clone of this repo (with `.env` beside `compose.yaml`):
 
 ```bash
-cd /path/to/repo/checkout   # or your fixed clone path
+git pull origin main
+docker compose -f compose.yaml up -d --build
+```
+
+**Rollback** (if you still tag images locally, e.g. `adk-agent:previous`):
+
+```bash
+cd /path/to/repo
 docker tag adk-agent:previous adk-agent:current
 docker compose -f compose.yaml up -d
 ```
