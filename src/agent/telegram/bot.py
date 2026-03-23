@@ -23,6 +23,7 @@ import re
 import sys
 
 from dotenv import load_dotenv
+from openinference.instrumentation.google_adk import GoogleADKInstrumentor
 from telegram import Bot, BotCommand, InputFile, Update
 from telegram._message import Message
 from telegram.constants import ParseMode
@@ -36,6 +37,7 @@ from telegram.ext import (
 )
 
 from ..utils.app_timezone import format_stored_instant_for_display
+from ..utils.observability import configure_otel_resource, setup_logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -79,6 +81,38 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_MESSAGE_LENGTH = 4096  # Telegram's message limit
 TELEGRAM_DOCUMENT_CAPTION_MAX = 1024
+TELEGRAM_MAX_CONCURRENT_UPDATES = 32
+_TELEGRAM_OBSERVABILITY_INITIALIZED = False
+
+
+def _initialize_observability() -> None:
+    """Initialize OpenTelemetry and logging for the Telegram entrypoint.
+
+    The FastAPI server already performs this setup at import time. The Telegram
+    bot has a separate process entrypoint, so it needs to bootstrap the same
+    observability stack before the first ADK invocation starts.
+    """
+    global _TELEGRAM_OBSERVABILITY_INITIALIZED
+
+    if _TELEGRAM_OBSERVABILITY_INITIALIZED:
+        return
+
+    configured_agent_name = os.getenv("AGENT_NAME")
+    if configured_agent_name is None:
+        agent_name = app.name
+    else:
+        stripped_agent_name = configured_agent_name.strip()
+        agent_name = stripped_agent_name if stripped_agent_name else app.name
+
+    configured_log_level = os.getenv("LOG_LEVEL", "INFO")
+    log_level = configured_log_level.strip() if configured_log_level else "INFO"
+
+    configure_otel_resource(agent_name=agent_name)
+    GoogleADKInstrumentor().instrument()
+    setup_logging(log_level=log_level)
+
+    _TELEGRAM_OBSERVABILITY_INITIALIZED = True
+    logger.info("Telegram observability initialized for agent %s", agent_name)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -370,6 +404,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_id=user_id,
             message=user_message,
         )
+
+        if reply.superseded:
+            logger.info("Skipping superseded Telegram reply for user %s", user_id)
+            return
 
         response_text = reply.text
         has_text = bool(response_text and response_text.strip())
@@ -718,7 +756,11 @@ def create_application(token: str) -> Application:
 
     # Create the Telegram Application
     application = (
-        Application.builder().token(token).post_init(_set_bot_commands).build()
+        Application.builder()
+        .token(token)
+        .concurrent_updates(TELEGRAM_MAX_CONCURRENT_UPDATES)
+        .post_init(_set_bot_commands)
+        .build()
     )
 
     # Add command handlers
@@ -797,6 +839,7 @@ def run_bot(token: str | None) -> int:
         logger.error("TELEGRAM_BOT_TOKEN environment variable is required")
         return 1
 
+    _initialize_observability()
     application = create_application(token)
 
     # Start the bot

@@ -1,5 +1,6 @@
 """Tests for telegram_handler module."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import NoReturn
@@ -371,6 +372,152 @@ class TestTelegramHandler:
             response = await handler.process_message("user-1", "Hello")
 
         assert response.text == "Response"
+
+    @pytest.mark.asyncio
+    async def test_process_message_supersedes_inflight_turn(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """A newer Telegram message cancels the stale in-flight turn."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        first_turn_started = asyncio.Event()
+
+        async def mock_run_async(
+            *,
+            new_message: types.Content,
+            **kwargs: object,
+        ) -> object:
+            assert new_message.parts is not None
+            prompt = new_message.parts[0].text
+            if prompt == "first":
+                first_turn_started.set()
+                await asyncio.Future()
+
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="newest")])
+            )
+
+        with (
+            patch.object(handler.runner, "run_async", mock_run_async),
+            patch(
+                "agent.telegram.handler.discard_telegram_staging_files"
+            ) as mock_discard,
+        ):
+            first_task = asyncio.create_task(handler.process_message("user-1", "first"))
+            await first_turn_started.wait()
+
+            second_reply = await handler.process_message(
+                "user-1",
+                "stop and answer briefly",
+            )
+            first_reply = await first_task
+
+        assert first_reply.superseded is True
+        assert first_reply.text == ""
+        assert second_reply.text == "newest"
+        mock_discard.assert_called_once_with([])
+
+    @pytest.mark.asyncio
+    async def test_process_message_reraises_external_cancellation(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """External cancellation should propagate when no newer turn superseded it."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        run_started = asyncio.Event()
+
+        async def mock_run_async(**kwargs: object) -> object:
+            run_started.set()
+            await asyncio.Future()
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="unused")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            task = asyncio.create_task(handler.process_message("user-1", "first"))
+            await run_started.wait()
+            task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    @pytest.mark.asyncio
+    async def test_reset_session_cancels_inflight_turn(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Reset should cancel the stale turn before recreating the session."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        run_started = asyncio.Event()
+
+        async def mock_run_async(**kwargs: object) -> object:
+            run_started.set()
+            await asyncio.Future()
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="unused")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            first_task = asyncio.create_task(handler.process_message("user-1", "first"))
+            await run_started.wait()
+
+            reset_result = await handler.reset_session("user-1")
+            first_reply = await first_task
+
+        assert reset_result is True
+        assert first_reply.superseded is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_active_turn_handles_plain_cancelled_error(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """The reset helper should also tolerate plain task cancellation."""
+        import agent.telegram.handler as handler_module
+
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        conversation_state = await handler._get_conversation_state("user-1", "user-1")
+
+        async def never_finish() -> TelegramAgentReply:
+            await asyncio.Future()
+            raise AssertionError("unreachable")
+
+        active_task = asyncio.create_task(never_finish())
+        async with conversation_state.lock:
+            conversation_state.next_request_id = 1
+            conversation_state.active_turn = handler_module._ActiveTelegramTurn(
+                request_id=1,
+                task=active_task,
+            )
+
+        await handler._cancel_active_turn("user-1", "user-1")
+
+        assert active_task.cancelled() is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_active_turn_handles_superseded_error(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """The reset helper should swallow the custom superseded cancellation."""
+        import agent.telegram.handler as handler_module
+
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+        conversation_state = await handler._get_conversation_state("user-1", "user-1")
+
+        async def raise_superseded() -> TelegramAgentReply:
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError as exc:
+                raise handler_module.TelegramTurnSupersededError() from exc
+            raise AssertionError("unreachable")
+
+        active_task = asyncio.create_task(raise_superseded())
+        async with conversation_state.lock:
+            conversation_state.next_request_id = 1
+            conversation_state.active_turn = handler_module._ActiveTelegramTurn(
+                request_id=1,
+                task=active_task,
+            )
+
+        await handler._cancel_active_turn("user-1", "user-1")
+
+        assert active_task.done() is True
 
     @pytest.mark.asyncio
     async def test_reset_session_deletes_and_creates_new(

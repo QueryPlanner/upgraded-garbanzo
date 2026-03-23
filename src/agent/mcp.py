@@ -79,7 +79,10 @@ def _create_notion_mcp_toolset() -> McpToolset | None:
             timeout=timeout_seconds,
         ),
         tool_name_prefix="notion",
-        use_mcp_resources=True,
+        # The current Notion MCP server exposes tools but does not implement
+        # the optional MCP resources/list methods. Keep tool access enabled
+        # without the noisy resource-probing warnings.
+        use_mcp_resources=False,
     )
 
 
