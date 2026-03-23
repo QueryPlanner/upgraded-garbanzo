@@ -12,6 +12,7 @@ from telegram.error import TelegramError
 
 from agent.telegram.bot import (
     TELEGRAM_DOCUMENT_CAPTION_MAX,
+    TELEGRAM_MAX_CONCURRENT_UPDATES,
     _render_markdown_as_html,
     _send_long_message,
     _send_queued_telegram_documents,
@@ -285,6 +286,20 @@ class TestHandleMessage:
         await handle_message(update, mock_context)
 
         assert True
+
+    @pytest.mark.asyncio
+    async def test_skips_superseded_reply(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """A superseded turn should not send stale text or fallback output."""
+        with patch(
+            "agent.telegram.bot.process_message",
+            new_callable=AsyncMock,
+            return_value=TelegramAgentReply(text="", superseded=True),
+        ):
+            await handle_message(mock_update, mock_context)
+
+        mock_update.message.reply_text.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handles_telegram_error_gracefully(
@@ -809,6 +824,16 @@ class TestCreateApplication:
             # start, help, reset, model, tokens, reminders, message
             assert len(handlers) == 7
 
+    def test_enables_concurrent_update_processing(self) -> None:
+        """Telegram steering needs updates to be processed concurrently."""
+        with patch("agent.telegram.bot.initialize_runner"):
+            app = create_application("test-token-123")
+
+        assert (
+            app.update_processor.max_concurrent_updates
+            == TELEGRAM_MAX_CONCURRENT_UPDATES
+        )
+
     def test_uses_app_for_initialization(self) -> None:
         """Test that app is used for initialization."""
         with (
@@ -826,6 +851,64 @@ class TestCreateApplication:
                 app=mock_app,
                 session_service=mock_session.return_value,
             )
+
+
+class TestInitializeObservability:
+    """Tests for Telegram observability bootstrap."""
+
+    def test_initializes_observability_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bootstrap OTel and logging once even if called repeatedly."""
+        import agent.telegram.bot as bot_module
+
+        monkeypatch.setattr(bot_module, "_TELEGRAM_OBSERVABILITY_INITIALIZED", False)
+        monkeypatch.setenv("AGENT_NAME", "telegram-agent")
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+
+        mock_instrumentor = MagicMock()
+
+        with (
+            patch.object(bot_module, "configure_otel_resource") as mock_configure,
+            patch.object(bot_module, "setup_logging") as mock_setup_logging,
+            patch.object(
+                bot_module,
+                "GoogleADKInstrumentor",
+                return_value=mock_instrumentor,
+            ) as mock_instrumentor_class,
+        ):
+            bot_module._initialize_observability()
+            bot_module._initialize_observability()
+
+        mock_configure.assert_called_once_with(agent_name="telegram-agent")
+        mock_instrumentor_class.assert_called_once_with()
+        mock_instrumentor.instrument.assert_called_once_with()
+        mock_setup_logging.assert_called_once_with(log_level="DEBUG")
+
+    def test_falls_back_to_app_name_when_agent_name_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Use the ADK app name when AGENT_NAME is not configured."""
+        import agent.telegram.bot as bot_module
+
+        monkeypatch.setattr(bot_module, "_TELEGRAM_OBSERVABILITY_INITIALIZED", False)
+        monkeypatch.delenv("AGENT_NAME", raising=False)
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+        mock_instrumentor = MagicMock()
+
+        with (
+            patch.object(bot_module, "configure_otel_resource") as mock_configure,
+            patch.object(bot_module, "setup_logging"),
+            patch.object(
+                bot_module,
+                "GoogleADKInstrumentor",
+                return_value=mock_instrumentor,
+            ),
+        ):
+            bot_module._initialize_observability()
+
+        mock_configure.assert_called_once_with(agent_name=bot_module.app.name)
 
 
 class TestSetBotCommands:
@@ -878,10 +961,14 @@ class TestRunBot:
 
         import agent.telegram.bot as bot_module
 
-        with patch.object(bot_module, "create_application", return_value=mock_app):
+        with (
+            patch.object(bot_module, "_initialize_observability") as mock_init_obs,
+            patch.object(bot_module, "create_application", return_value=mock_app),
+        ):
             result = bot_module.run_bot("test-token")
 
             assert result == 0
+            mock_init_obs.assert_called_once_with()
             mock_app.run_polling.assert_called_once()
 
 

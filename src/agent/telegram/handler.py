@@ -4,11 +4,12 @@ This module provides a Telegram bot that bridges messages between Telegram
 and the ADK agent, allowing users to interact with the agent via Telegram.
 """
 
+import asyncio
 import logging
 import os
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -63,6 +64,29 @@ class TelegramAgentReply:
 
     text: str
     documents: tuple[PendingTelegramFile, ...] = field(default_factory=tuple)
+    superseded: bool = False
+
+
+class TelegramTurnSupersededError(asyncio.CancelledError):
+    """Raised when a newer Telegram message replaces an in-flight turn."""
+
+
+@dataclass
+class _ActiveTelegramTurn:
+    """Track the current in-flight turn for one Telegram conversation."""
+
+    request_id: int
+    task: asyncio.Task[TelegramAgentReply]
+
+
+@dataclass
+class _TelegramConversationState:
+    """Mutable coordination state for one Telegram conversation."""
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    next_request_id: int = 0
+    active_turn: _ActiveTelegramTurn | None = None
+    superseded_request_ids: set[int] = field(default_factory=set)
 
 
 def _telegram_latency_log_enabled() -> bool:
@@ -178,6 +202,88 @@ class TelegramHandler:
         else:
             raise ValueError("Either 'agent' or 'app' must be provided")
 
+        self._conversation_states: dict[
+            tuple[str, str], _TelegramConversationState
+        ] = {}
+        self._conversation_states_lock = asyncio.Lock()
+
+    async def _get_conversation_state(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> _TelegramConversationState:
+        """Return the mutable turn state for one Telegram conversation."""
+        conversation_key = (user_id, session_id)
+
+        async with self._conversation_states_lock:
+            existing_state = self._conversation_states.get(conversation_key)
+            if existing_state is not None:
+                return existing_state
+
+            new_state = _TelegramConversationState()
+            self._conversation_states[conversation_key] = new_state
+            return new_state
+
+    async def _clear_conversation_state_if_idle(
+        self,
+        user_id: str,
+        session_id: str,
+        conversation_state: _TelegramConversationState,
+    ) -> None:
+        """Drop idle coordination state so finished chats do not accumulate."""
+        async with conversation_state.lock:
+            has_active_turn = conversation_state.active_turn is not None
+            has_superseded_requests = bool(conversation_state.superseded_request_ids)
+            has_seen_requests = conversation_state.next_request_id > 0
+
+        if has_active_turn or has_superseded_requests or not has_seen_requests:
+            return
+
+        conversation_key = (user_id, session_id)
+        async with self._conversation_states_lock:
+            cached_state = self._conversation_states.get(conversation_key)
+            if cached_state is conversation_state:
+                self._conversation_states.pop(conversation_key, None)
+
+    async def _consume_superseded_request(
+        self,
+        conversation_state: _TelegramConversationState,
+        request_id: int,
+    ) -> bool:
+        """Return True once for requests that were intentionally replaced."""
+        async with conversation_state.lock:
+            if request_id not in conversation_state.superseded_request_ids:
+                return False
+
+            conversation_state.superseded_request_ids.remove(request_id)
+            return True
+
+    async def _cancel_active_turn(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> None:
+        """Cancel any in-flight turn for the conversation and suppress its reply."""
+        conversation_state = await self._get_conversation_state(user_id, session_id)
+
+        async with conversation_state.lock:
+            active_turn = conversation_state.active_turn
+            if active_turn is None or active_turn.task.done():
+                return
+
+            conversation_state.superseded_request_ids.add(active_turn.request_id)
+            active_task = active_turn.task
+            active_task.cancel()
+
+        with suppress(asyncio.CancelledError):
+            await active_task
+
+        await self._clear_conversation_state_if_idle(
+            user_id=user_id,
+            session_id=session_id,
+            conversation_state=conversation_state,
+        )
+
     def _resolve_litellm_model_for_session_state(
         self,
         session_state: dict[str, Any] | None,
@@ -211,61 +317,120 @@ class TelegramHandler:
         Returns:
             Reply text and any files tools queued for Telegram delivery.
         """
-        latency_log = _telegram_latency_log_enabled()
-        pipeline_start = time.perf_counter()
-
-        # Use user_id as session_id if not provided
         effective_session_id = session_id or user_id
-
-        # Create or get existing session
-        session = await self.runner.session_service.get_session(
-            app_name=self.app_name,
+        conversation_state = await self._get_conversation_state(
             user_id=user_id,
             session_id=effective_session_id,
         )
 
+        request_id: int
+        async with conversation_state.lock:
+            conversation_state.next_request_id += 1
+            request_id = conversation_state.next_request_id
+
+            active_turn = conversation_state.active_turn
+            if active_turn is not None and not active_turn.task.done():
+                conversation_state.superseded_request_ids.add(active_turn.request_id)
+                active_turn.task.cancel()
+
+            task = asyncio.create_task(
+                self._run_message_turn(
+                    user_id=user_id,
+                    message=message,
+                    session_id=effective_session_id,
+                    force_litellm_model=force_litellm_model,
+                )
+            )
+            conversation_state.active_turn = _ActiveTelegramTurn(
+                request_id=request_id,
+                task=task,
+            )
+
+        try:
+            return await task
+        except asyncio.CancelledError:
+            was_superseded = await self._consume_superseded_request(
+                conversation_state=conversation_state,
+                request_id=request_id,
+            )
+            if was_superseded:
+                return TelegramAgentReply(text="", superseded=True)
+            raise
+        finally:
+            async with conversation_state.lock:
+                active_turn = conversation_state.active_turn
+                is_current_turn = (
+                    active_turn is not None and active_turn.request_id == request_id
+                )
+                if is_current_turn:
+                    conversation_state.active_turn = None
+
+            await self._clear_conversation_state_if_idle(
+                user_id=user_id,
+                session_id=effective_session_id,
+                conversation_state=conversation_state,
+            )
+
+    async def _run_message_turn(
+        self,
+        *,
+        user_id: str,
+        message: str,
+        session_id: str,
+        force_litellm_model: str | None,
+    ) -> TelegramAgentReply:
+        """Run one Telegram turn.
+
+        This repo uses LiteLLM-backed ADK models. LiteLLM supports unary
+        ``run_async()`` but not ADK live bidi ``connect()`` sessions, so the
+        Telegram steering behavior is implemented as "newest message wins":
+        cancel the in-flight turn, suppress its stale reply, and run the newest
+        message immediately in the same ADK session.
+        """
+        latency_log = _telegram_latency_log_enabled()
+        pipeline_start = time.perf_counter()
+
+        session = await self.runner.session_service.get_session(
+            app_name=self.app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
         if session is None:
-            # Create session with initial state containing user_id
             session = await self.runner.session_service.create_session(
                 app_name=self.app_name,
                 user_id=user_id,
-                session_id=effective_session_id,
+                session_id=session_id,
                 state={"user_id": user_id},
             )
             logger.info(f"Created new session with user_id={user_id}")
-        else:
-            # If user_id is missing from session state, delete and recreate
-            # (modifying session.state in memory doesn't persist to database)
-            if "user_id" not in session.state:
-                logger.info(f"Session missing user_id, recreating for user={user_id}")
-                try:
-                    await self.runner.session_service.delete_session(
-                        app_name=self.app_name,
-                        user_id=user_id,
-                        session_id=effective_session_id,
-                    )
-                except Exception:
-                    logger.warning(
-                        f"Could not delete session for user={user_id}, "
-                        f"session={effective_session_id}. Proceeding with recreation."
-                    )
-                session = await self.runner.session_service.create_session(
+        elif "user_id" not in session.state:
+            logger.info(f"Session missing user_id, recreating for user={user_id}")
+            try:
+                await self.runner.session_service.delete_session(
                     app_name=self.app_name,
                     user_id=user_id,
-                    session_id=effective_session_id,
-                    state={"user_id": user_id},
+                    session_id=session_id,
                 )
-                logger.info(f"Recreated session with user_id={user_id}")
+            except Exception:
+                logger.warning(
+                    f"Could not delete session for user={user_id}, "
+                    f"session={session_id}. Proceeding with recreation."
+                )
+            session = await self.runner.session_service.create_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=session_id,
+                state={"user_id": user_id},
+            )
+            logger.info(f"Recreated session with user_id={user_id}")
 
         logger.info(f"Session state keys: {list(session.state.keys())}")
 
         session_ready = time.perf_counter()
-
-        # Create the user message
         content = types.Content(role="user", parts=[types.Part(text=message)])
-
-        # Run the agent and collect the response
         response_parts: list[str] = []
+
         if latency_log:
             session_ms = (session_ready - pipeline_start) * 1000
             logger.info(
@@ -286,7 +451,7 @@ class TelegramHandler:
             async with _telegram_litellm_model_context(resolved_model):
                 async for event in self.runner.run_async(
                     user_id=user_id,
-                    session_id=effective_session_id,
+                    session_id=session_id,
                     new_message=content,
                 ):
                     if latency_log and not first_stream_event_logged:
@@ -301,14 +466,16 @@ class TelegramHandler:
                             ms_after_run,
                         )
 
-                    # Extract text from model responses, filtering out thought parts
-                    # Thought parts contain internal reasoning and should not be shown
                     if event.content and event.content.parts:
                         for part in event.content.parts:
                             if hasattr(part, "thought") and part.thought:
                                 continue
                             if part.text:
                                 response_parts.append(part.text)
+        except asyncio.CancelledError as exc:
+            pending_on_cancel = end_telegram_file_batch()
+            discard_telegram_staging_files(pending_on_cancel)
+            raise TelegramTurnSupersededError() from exc
         except Exception:
             pending_on_error = end_telegram_file_batch()
             discard_telegram_staging_files(pending_on_error)
@@ -341,6 +508,11 @@ class TelegramHandler:
             True if session was reset successfully, False otherwise.
         """
         effective_session_id = session_id or user_id
+
+        await self._cancel_active_turn(
+            user_id=user_id,
+            session_id=effective_session_id,
+        )
 
         try:
             # Delete existing session if it exists
