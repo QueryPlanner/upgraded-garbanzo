@@ -41,6 +41,8 @@ services:
       - agent_context:/app/src/.context
       # Agent memory log (MEMORY.md) and QMD-indexed markdown
       - agent_memory:/app/memory
+      # Garbanzo home: repos, configs, caches, Playwright browsers, extra tools
+      - garbanzo_home:/home/app/garbanzo-home
     restart: always
     command: python -m agent.telegram.bot
 
@@ -49,3 +51,4 @@ volumes:
   agent_data:
   agent_context:
   agent_memory:
+  garbanzo_home:

@@ -22,6 +22,8 @@ services:
       - agent_artifacts:/app/src/.adk
       - agent_data:/app/src/agent/data
       - agent_context:/app/src/.context
+      - agent_memory:/app/memory
+      - garbanzo_home:/home/app/garbanzo-home
     restart: always
     command: python -m agent.telegram.bot
 
@@ -29,3 +31,5 @@ volumes:
   agent_artifacts:
   agent_data:
   agent_context:
+  agent_memory:
+  garbanzo_home:
