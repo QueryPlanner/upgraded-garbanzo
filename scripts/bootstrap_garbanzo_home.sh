@@ -7,7 +7,7 @@ log() {
 
 configure_git() {
     git config --global user.name "${GARBANZO_GIT_USER_NAME:-QueryPlanner}"
-    git config --global user.email "${GARBANZO_GIT_USER_EMAIL:-chiragnpatil@gmail.com}"
+    git config --global user.email "${GARBANZO_GIT_USER_EMAIL:-garbanzo@example.com}"
     git config --global init.defaultBranch "${GARBANZO_GIT_DEFAULT_BRANCH:-main}"
     git config --global fetch.prune true
     git config --global push.autoSetupRemote true
