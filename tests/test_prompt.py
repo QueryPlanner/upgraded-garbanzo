@@ -84,6 +84,30 @@ class TestReturnInstructionRoot:
         assert "cron expression" in instruction
         assert "Do not call schedule_reminder again" in instruction
 
+    def test_instruction_uses_configured_garbanzo_home(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that Garbanzo advertises the configured durable home path."""
+        configured_home = "/srv/garbanzo-home"
+        monkeypatch.setenv("GARBANZO_HOME", configured_home)
+
+        instruction = return_instruction_root()
+
+        assert configured_home in instruction
+        assert f"{configured_home}/workspace" in instruction
+
+    def test_instruction_uses_default_garbanzo_home_when_env_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that Garbanzo falls back to the Docker default home path."""
+        default_home = "/home/app/garbanzo-home"
+        monkeypatch.delenv("GARBANZO_HOME", raising=False)
+
+        instruction = return_instruction_root()
+
+        assert default_home in instruction
+        assert f"{default_home}/workspace" in instruction
+
 
 class TestReturnGlobalInstruction:
     """Tests for return_global_instruction InstructionProvider function."""

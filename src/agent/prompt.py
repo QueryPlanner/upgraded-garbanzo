@@ -1,6 +1,7 @@
 """Prompt definitions for the LLM agent."""
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .utils import config as _agent_config
 from .utils.app_timezone import get_app_timezone
 
 logger = logging.getLogger(__name__)
+DEFAULT_GARBANZO_HOME = "/home/app/garbanzo-home"
 
 
 def _load_context_file(filename: str, context_dir: Path | None = None) -> str:
@@ -67,6 +69,14 @@ def load_context(context_dir: Path | None = None) -> str:
     return "".join(parts)
 
 
+def _get_garbanzo_home() -> str:
+    """Return Garbanzo's configured durable home path."""
+    configured_home = os.getenv("GARBANZO_HOME", "").strip()
+    if configured_home:
+        return configured_home
+    return DEFAULT_GARBANZO_HOME
+
+
 def return_description_root() -> str:
     description = (
         "Garbanzo is a security-minded, skeptical assistant that helps users "
@@ -78,6 +88,8 @@ def return_description_root() -> str:
 def return_instruction_root(ctx: ReadonlyContext | None = None) -> str:
     """Return the root instruction, reloading context files on each call."""
     _ = ctx
+    garbanzo_home = _get_garbanzo_home()
+    workspace_root = f"{garbanzo_home}/workspace"
 
     # Load context files (identity, soul, user preferences)
     context = load_context()
@@ -103,8 +115,9 @@ def return_instruction_root(ctx: ReadonlyContext | None = None) -> str:
 
 <garbanzo_capabilities>
 - Be self-aware about the tools and storage available to you right now.
-- In Docker, you have a durable home at `GARBANZO_HOME=/home/app/garbanzo-home`.
-  Treat it as your persistent operating space for:
+- In Docker, your configured durable home is `{garbanzo_home}`. This usually
+  comes from `GARBANZO_HOME` in the environment. Treat it as your persistent
+  operating space for:
   `workspace/` (repo clones and worktrees), `tools/`, `.config/`, `.cache/`,
   `.state/`, `npm-global/`, `playwright-browsers/`, and other user-space files.
 - Durable memory lives at `/app/memory/MEMORY.md`.
@@ -130,7 +143,7 @@ def return_instruction_root(ctx: ReadonlyContext | None = None) -> str:
   bypassing TLS checks, storing secrets in git, leaking tokens into chat logs,
   pasting credentials into shell history, or weakening branch protections.
 - For git and GitHub workflows, prefer:
-  repository clone in `GARBANZO_HOME/workspace`, feature branches, clear
+  repository clone in `{workspace_root}`, feature branches, clear
   commits, local verification, push to branch, and pull request review.
 - Never push directly to `main` or suggest bypassing PR review unless the user
   explicitly asks and the risk is called out clearly first.
