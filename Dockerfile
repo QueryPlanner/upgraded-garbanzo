@@ -38,12 +38,15 @@ FROM python:3.13-slim AS runtime
 
 # Install system dependencies
 # - netcat-openbsd: for checking DB readiness (used in entrypoint.sh)
-# - Node.js 22+ (NodeSource): required by @tobilu/qmd and MCP CLIs below
+# - git: branch, commit, and worktree support for delegated coding tasks
+# - GitHub CLI: create PRs and inspect GitHub state from inside the container
+# - Node.js 22+ (NodeSource): required by agent-browser, Gemini CLI, and MCP CLIs
 # - build deps: native addons during npm install (purged after install)
 # - chromium: browser for agent-browser (Chrome-for-Testing install has no linux-arm64)
-# - curl, ca-certificates, gnupg: HTTPS and NodeSource repo
+# - curl, ca-certificates, gnupg: HTTPS plus package signing keys
 RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
+    git \
     ca-certificates \
     curl \
     gnupg \
@@ -56,8 +59,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g agent-browser @tobilu/qmd @notionhq/notion-mcp-server \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs gh \
+    && pip install --no-cache-dir uv==0.9.26 \
+    && npm install -g \
+        agent-browser \
+        @google/gemini-cli \
+        @notionhq/notion-mcp-server \
+        @tobilu/qmd \
     && apt-get purge -y build-essential cmake libsqlite3-dev \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
@@ -76,16 +89,19 @@ WORKDIR /app
 # - /app/src/agent/data: Local SQLite fallback and other files when not using Postgres
 # - /app/src/.context: Context files (USER.md, IDENTITY.md, SOUL.md)
 # - /app/memory: durable agent memory (MEMORY.md); seed copied in entrypoint if empty
+# - /home/app/garbanzo-home: durable coding home for repos, configs, caches, and tools
 RUN mkdir -p /app/src/.adk/artifacts \
              /app/src/agent/data \
              /app/src/.context \
              /app/memory \
-    && chown -R app:app /app
+             /home/app/garbanzo-home \
+    && chown -R app:app /app /home/app/garbanzo-home
 
 # Copy application and virtual environment from builder
 COPY --from=builder --chown=app:app /app .
 
-# Playwright: OS deps as root, browsers under a shared path for the app user
+# Playwright: OS deps as root, browsers seeded in-image and copied to garbanzo-home
+# on first boot when the persistent home volume is empty.
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/pw-browsers
 RUN mkdir -p /app/pw-browsers \
     && chown app:app /app/pw-browsers \
@@ -95,6 +111,10 @@ RUN mkdir -p /app/pw-browsers \
 # Copy entrypoint script and set ownership/permissions
 COPY --chown=app:app entrypoint.sh .
 RUN chmod +x entrypoint.sh
+
+# Utility scripts for Garbanzo bootstrap and delegated coding workflows
+COPY --chown=app:app scripts /app/scripts
+RUN find /app/scripts -type f -name '*.sh' -exec chmod +x {} \;
 
 # Copy context files (IDENTITY.md, SOUL.md - USER.md is user-specific)
 COPY --chown=app:app .context/*.md /app/src/.context/
@@ -107,7 +127,17 @@ COPY --chown=app:app memory/MEMORY.md /app/.memory-seed/MEMORY.md
 
 # Set environment to use virtual environment
 ENV VIRTUAL_ENV=/app/.venv \
-    PATH="/home/app/.local/bin:/app/.venv/bin:$PATH" \
+    GARBANZO_HOME=/home/app/garbanzo-home \
+    HOME=/home/app/garbanzo-home \
+    XDG_CONFIG_HOME=/home/app/garbanzo-home/.config \
+    XDG_CACHE_HOME=/home/app/garbanzo-home/.cache \
+    XDG_STATE_HOME=/home/app/garbanzo-home/.state \
+    NPM_CONFIG_PREFIX=/home/app/garbanzo-home/npm-global \
+    NPM_CONFIG_CACHE=/home/app/garbanzo-home/.cache/npm \
+    PIP_CACHE_DIR=/home/app/garbanzo-home/.cache/pip \
+    UV_CACHE_DIR=/home/app/garbanzo-home/.cache/uv \
+    PLAYWRIGHT_BROWSERS_PATH=/home/app/garbanzo-home/playwright-browsers \
+    PATH="/home/app/garbanzo-home/tools/bin:/home/app/garbanzo-home/npm-global/bin:/home/app/garbanzo-home/.local/bin:/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     AGENT_DIR=/app/src \
     AGENT_SKILLS_DIR=/app/skills \
@@ -119,7 +149,7 @@ ENV VIRTUAL_ENV=/app/.venv \
 USER app
 
 # Install Claude Code for in-container developer workflows and MCP support.
-RUN mkdir -p /home/app/.claude /home/app/.local/bin /home/app/.local/share \
+RUN mkdir -p "$HOME/.claude" "$HOME/.local/bin" "$HOME/.local/share" \
     && curl -fsSL https://claude.ai/install.sh | bash \
     && claude --version
 
