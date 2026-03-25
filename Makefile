@@ -141,16 +141,20 @@ status:
 # Cleanup
 # =============================================================================
 dev-clean:
-	@echo "⚠️  WARNING: This will delete all development data!"
-	@echo "Press Ctrl+C to cancel, or Enter to continue..."
-	@read confirm
+	@if [ "$(force)" != "1" ]; then \
+		echo "⚠️  WARNING: This will delete all development data!"; \
+		echo "Press Ctrl+C to cancel, or Enter to continue..."; \
+		read -r; \
+	fi
 	docker compose -f docker-compose.dev.yml down -v --remove-orphans
 	@echo "✅ Development environment and volumes removed"
 
 prod-clean:
-	@echo "⚠️  WARNING: This will delete all production data!"
-	@echo "Press Ctrl+C to cancel, or Enter to continue..."
-	@read confirm
+	@if [ "$(force)" != "1" ]; then \
+		echo "⚠️  WARNING: This will delete all production data!"; \
+		echo "Press Ctrl+C to cancel, or Enter to continue..."; \
+		read -r; \
+	fi
 	docker compose -f docker-compose.prod.yml down -v --remove-orphans
 	@echo "✅ Production environment and volumes removed"
 
