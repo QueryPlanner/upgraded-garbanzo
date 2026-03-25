@@ -98,12 +98,9 @@ RUN mkdir -p /app/src/.adk/artifacts \
 # Copy application and virtual environment from builder
 COPY --from=builder --chown=app:app /app .
 
-# Playwright: Install OS deps and browser (changes rarely)
-ENV PLAYWRIGHT_BROWSERS_PATH=/app/pw-browsers
-RUN mkdir -p /app/pw-browsers \
-    && chown app:app /app/pw-browsers \
-    && /app/.venv/bin/playwright install-deps chromium \
-    && su -s /bin/sh app -c "/app/.venv/bin/playwright install chromium"
+# Playwright: Install OS deps only (browser is system chromium via apt)
+# Skip browser download since we use system chromium at /usr/bin/chromium
+RUN /app/.venv/bin/playwright install-deps chromium
 
 # Copy entrypoint script and set ownership/permissions
 COPY --chown=app:app entrypoint.sh .
