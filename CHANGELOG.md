@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configurable Connection Pooling:** Exposed PostgreSQL connection pool settings (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, etc.) via environment variables.
 - **Observability Configuration:** Added support for configuring `ROOT_AGENT_MODEL` and Langfuse keys (`LANGFUSE_PUBLIC_KEY`, etc.) via deployment secrets.
 - **Testing Standards:** Added `AGENTS.md` with strict guidelines for AI assistants, enforcing real-code testing over mocking internal logic.
+- **Documentation:** Updated `README.md` and `docs/DEPLOYMENT.md` with comprehensive deployment guides.
 - **Telegram Bot Integration:** Full Telegram bot support with slash commands and message handling.
 - **Reminder Scheduling System:** Schedule and manage reminders with natural language date/time parsing.
 - **Fitness Tracking:** Persist fitness data with SQLite storage.
