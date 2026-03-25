@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.14
 
 # ============================================================================
 # Builder Stage: Install dependencies with optimal caching
@@ -36,46 +36,49 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ============================================================================
 FROM python:3.13-slim AS runtime
 
-# Install system dependencies
-# - netcat-openbsd: for checking DB readiness (used in entrypoint.sh)
-# - git: branch, commit, and worktree support for delegated coding tasks
-# - GitHub CLI: create PRs and inspect GitHub state from inside the container
-# - Node.js 22+ (NodeSource): required by agent-browser, Gemini CLI, and MCP CLIs
-# - build deps: native addons during npm install (purged after install)
-# - chromium: browser for agent-browser (Chrome-for-Testing install has no linux-arm64)
-# - curl, ca-certificates, gnupg: HTTPS plus package signing keys
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install base system packages (rarely changes - good cache layer)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     git \
     ca-certificates \
     curl \
     gnupg \
-    chromium \
-    build-essential \
-    cmake \
-    libsqlite3-dev \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Node.js repository (rarely changes)
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        > /etc/apt/sources.list.d/nodesource.list
+
+# Add GitHub CLI repository (rarely changes)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends nodejs gh \
-    && pip install --no-cache-dir uv==0.9.26 \
-    && npm install -g \
+        > /etc/apt/sources.list.d/github-cli.list
+
+# Install Node.js, GitHub CLI, and chromium (changes rarely)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    nodejs \
+    gh \
+    chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install global npm packages with cache (changes occasionally)
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g \
         agent-browser \
         @google/gemini-cli \
         @notionhq/notion-mcp-server \
-        @tobilu/qmd \
-    && apt-get purge -y build-essential cmake libsqlite3-dev \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+        @tobilu/qmd
 
-# qmd global CLI available as `qmd` (see agent prompt for MEMORY.md + indexing)
+# Install uv for runtime use
+RUN pip install --no-cache-dir uv==0.9.26
 
 # Create non-root user for security (matching common host UID 1000)
 RUN groupadd -g 1000 app && \
@@ -85,11 +88,6 @@ RUN groupadd -g 1000 app && \
 WORKDIR /app
 
 # Pre-create directories for volume mounts and set ownership
-# - /app/src/.adk: ADK artifacts
-# - /app/src/agent/data: Local SQLite fallback and other files when not using Postgres
-# - /app/src/.context: Context files (USER.md, IDENTITY.md, SOUL.md)
-# - /app/memory: durable agent memory (MEMORY.md); seed copied in entrypoint if empty
-# - /home/app/garbanzo-home: durable coding home for repos, configs, caches, and tools
 RUN mkdir -p /app/src/.adk/artifacts \
              /app/src/agent/data \
              /app/src/.context \
@@ -100,13 +98,9 @@ RUN mkdir -p /app/src/.adk/artifacts \
 # Copy application and virtual environment from builder
 COPY --from=builder --chown=app:app /app .
 
-# Playwright: OS deps as root, browsers seeded in-image and copied to garbanzo-home
-# on first boot when the persistent home volume is empty.
-ENV PLAYWRIGHT_BROWSERS_PATH=/app/pw-browsers
-RUN mkdir -p /app/pw-browsers \
-    && chown app:app /app/pw-browsers \
-    && /app/.venv/bin/playwright install-deps chromium \
-    && su -s /bin/sh app -c "/app/.venv/bin/playwright install chromium"
+# Playwright: Install OS deps only (browser is system chromium via apt)
+# Skip browser download since we use system chromium at /usr/bin/chromium
+RUN /app/.venv/bin/playwright install-deps chromium
 
 # Copy entrypoint script and set ownership/permissions
 COPY --chown=app:app entrypoint.sh .
@@ -149,7 +143,8 @@ ENV VIRTUAL_ENV=/app/.venv \
 USER app
 
 # Install Claude Code for in-container developer workflows and MCP support.
-RUN mkdir -p "$HOME/.claude" "$HOME/.local/bin" "$HOME/.local/share" \
+RUN --mount=type=cache,target=/home/app/.cache \
+    mkdir -p "$HOME/.claude" "$HOME/.local/bin" "$HOME/.local/share" \
     && curl -fsSL https://claude.ai/install.sh | bash \
     && claude --version
 

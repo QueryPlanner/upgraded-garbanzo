@@ -1,0 +1,87 @@
+# =============================================================================
+# Development Environment Docker Compose
+# =============================================================================
+# Usage:
+#   Start:   docker compose -f docker-compose.dev.yml up -d
+#   Stop:    docker compose -f docker-compose.dev.yml down
+#   Logs:    docker compose -f docker-compose.dev.yml logs -f
+#   Rebuild: docker compose -f docker-compose.dev.yml up -d --build
+#
+# Services:
+#   - telegram-bot: Polls Telegram for messages (no port needed)
+#   - api: FastAPI web interface and health endpoint (port 3001)
+#
+# Environment: DEBUG logging, hot-reload enabled, no auto-restart
+# =============================================================================
+
+name: garbanzo-dev
+
+x-build-info: &build-info
+  image: ${IMAGE:-garbanzo-dev:latest}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    tags:
+      - garbanzo-dev:latest
+    args:
+      - BUILDKIT_INLINE_CACHE=1
+    cache_from:
+      - garbanzo-dev:latest
+
+x-volumes: &volumes
+  - agent_artifacts:/app/src/.adk
+  - agent_data:/app/src/agent/data
+  - agent_context:/app/src/.context
+  - agent_memory:/app/memory
+  - garbanzo_home:/home/app/garbanzo-home
+
+services:
+  telegram-bot:
+    <<: *build-info
+    container_name: garbanzo-dev-bot
+    env_file:
+      - .env.dev
+    environment:
+      - AGENT_NAME=dev-agent
+      - LOG_LEVEL=DEBUG
+    volumes: *volumes
+    restart: "no"  # Don't auto-restart in dev for easier debugging
+    labels:
+      - "environment=development"
+      - "project=garbanzo"
+      - "service=telegram-bot"
+    command: python -m agent.telegram.bot
+    profiles:
+      - bot
+      - all
+
+  api:
+    <<: *build-info
+    container_name: garbanzo-dev-api
+    env_file:
+      - .env.dev
+    environment:
+      - AGENT_NAME=dev-agent
+      - LOG_LEVEL=DEBUG
+      - HOST=0.0.0.0
+      - PORT=3001
+      - SERVE_WEB_INTERFACE=true
+      - RELOAD_AGENTS=true
+    ports:
+      - "3001:3001"
+    volumes: *volumes
+    restart: "no"
+    labels:
+      - "environment=development"
+      - "project=garbanzo"
+      - "service=api"
+    command: python -m agent.server
+    profiles:
+      - all
+
+volumes:
+  agent_artifacts: {}
+  agent_data: {}
+  agent_context: {}
+  agent_memory: {}
+  garbanzo_home: {}
