@@ -73,6 +73,109 @@ docker compose up --build -d
 
 👉 **[Read the Full Deployment Guide](docs/DEPLOYMENT.md)**
 
+## Multi-Environment Setup
+
+Run **development** and **production** environments simultaneously on the same machine with complete isolation.
+
+### Features
+
+- ✅ **Separate Ports**: Dev on `3001`, Prod on `3000`
+- ✅ **Isolated Data**: Separate volumes for each environment
+- ✅ **Independent Configs**: `.env.dev` and `.env.prod` files
+- ✅ **No Shared Secrets**: Each environment has its own API keys
+- ✅ **Independent Control**: Start/stop each environment separately
+
+### Quick Start
+
+1. **Create environment files:**
+   ```bash
+   cp .env.example .env.dev   # Development config
+   cp .env.example .env.prod  # Production config
+   ```
+
+2. **Edit each file with environment-specific values:**
+   - `.env.dev` - Use test API keys, DEBUG logging, dev database
+   - `.env.prod` - Use production keys, INFO logging, prod database
+
+3. **Start environments:**
+   ```bash
+   # Development (port 3001)
+   make dev
+
+   # Production (port 3000)
+   make prod
+
+   # Both simultaneously
+   make all-up
+   ```
+
+### Available Commands
+
+| Command | Description |
+| :--- | :--- |
+| `make dev` | Start development bot (default) |
+| `make dev-bot` | Start development Telegram bot |
+| `make dev-api` | Start development API server (port 3001) |
+| `make dev-all` | Start development bot + API |
+| `make prod` | Start production bot (default) |
+| `make prod-bot` | Start production Telegram bot |
+| `make prod-api` | Start production API server (port 3000) |
+| `make prod-all` | Start production bot + API |
+| `make dev-stop` | Stop development environment |
+| `make prod-stop` | Stop production environment |
+| `make dev-logs` | View development logs (follow mode) |
+| `make prod-logs` | View production logs (follow mode) |
+| `make all-up` | Start both dev and prod bots |
+| `make all-down` | Stop both environments |
+| `make status` | Show container and volume status |
+| `make dev-clean` | Remove dev containers and volumes ⚠️ |
+| `make prod-clean` | Remove prod containers and volumes ⚠️ |
+
+### Manual Docker Commands
+
+If you prefer direct Docker Compose commands:
+
+```bash
+# Development Bot
+docker compose -f docker-compose.dev.yml --profile bot up -d
+
+# Development API Server (port 3001)
+docker compose -f docker-compose.dev.yml --profile api up -d
+
+# Development Both Services
+docker compose -f docker-compose.dev.yml --profile all up -d
+
+# Production Bot
+docker compose -f docker-compose.prod.yml --profile bot up -d
+
+# Production API Server (port 3000)
+docker compose -f docker-compose.prod.yml --profile api up -d
+
+# Production Both Services
+docker compose -f docker-compose.prod.yml --profile all up -d
+
+# Stop any environment
+docker compose -f docker-compose.dev.yml down
+docker compose -f docker-compose.prod.yml down
+```
+
+### Environment Isolation
+
+| Aspect | Development | Production |
+| :--- | :--- | :--- |
+| Port | 3001 | 3000 |
+| Log Level | DEBUG | INFO |
+| Restart Policy | `no` (manual) | `unless-stopped` |
+| Volume Prefix | `garbanzo-dev_*` | `garbanzo-prod_*` |
+| Container Name | `garbanzo-dev-bot` | `garbanzo-prod-bot` |
+
+### Safety Guarantees
+
+- **No shared volumes**: Each environment uses separate Docker volumes
+- **No shared ports**: Different host ports prevent conflicts
+- **No shared configs**: Independent `.env` files for credentials
+- **Independent lifecycle**: Start/stop/rebuild without affecting the other
+
 ## Observability
 
 The template comes pre-wired with **OpenTelemetry**. By default, it's set up to export traces to **Langfuse** for beautiful, actionable insights into your agent's performance and costs.
