@@ -2,6 +2,55 @@
 
 You can deploy this Agent Platform using **Docker** (easiest compatibility) or **Bare Metal** (lowest resource usage).
 
+## Multi-Environment Deployment
+
+Run **development** and **production** environments simultaneously on the same machine with complete isolation.
+
+### Quick Start
+
+1. **Create environment files:**
+   ```bash
+   cp .env.example .env.dev   # Development config
+   cp .env.example .env.prod  # Production config
+   ```
+
+2. **Edit each file with environment-specific values:**
+   - `.env.dev` - Use test API keys, DEBUG logging, dev database
+   - `.env.prod` - Use production keys, INFO logging, prod database
+
+3. **Deploy using Makefile commands:**
+   ```bash
+   # Production only
+   make prod
+
+   # Or both environments
+   make all-up
+   ```
+
+### Available Commands
+
+| Command | Description |
+| :--- | :--- |
+| `make prod` | Start production bot |
+| `make prod-all` | Start prod bot + API (port 3000) |
+| `make prod-stop` | Stop production environment |
+| `make prod-logs` | View production logs |
+| `make all-up` | Start both dev and prod bots |
+| `make all-down` | Stop both environments |
+| `make status` | Show container status |
+
+### Environment Isolation
+
+| Aspect | Development | Production |
+| :--- | :--- | :--- |
+| Port | 3001 | 3000 |
+| Log Level | DEBUG | INFO |
+| Restart Policy | `no` (manual) | `unless-stopped` |
+| Volume Prefix | `garbanzo-dev_*` | `garbanzo-prod_*` |
+| Container Name | `garbanzo-dev-bot` | `garbanzo-prod-bot` |
+
+---
+
 ## Option 0: Automated Server Setup (Infrastructure as Code)
 
 To prepare a fresh Ubuntu/Debian server for production, run the included `setup.sh` script. This script automates:

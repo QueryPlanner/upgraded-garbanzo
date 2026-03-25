@@ -48,10 +48,21 @@ uv sync
 uv run python -m agent.server
 ```
 
-**Docker Compose (Recommended for full stack):**
+**Docker (Development):**
 ```bash
-docker compose up --build --watch
+make dev          # Start development bot
+make dev-all      # Start dev bot + API (port 3001)
+make dev-logs     # View logs
 ```
+
+**Docker (Production):**
+```bash
+make prod         # Start production bot
+make prod-all     # Start prod bot + API (port 3000)
+make prod-logs    # View logs
+```
+
+See `make help` or [README.md](../README.md#multi-environment-setup) for full command list.
 
 ### Workflow
 
