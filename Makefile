@@ -71,7 +71,7 @@ dev-stop:
 	@echo "✅ Development environment stopped"
 
 dev-logs:
-	docker compose -f docker-compose.dev.yml logs -f
+	docker compose -f docker-compose.dev.yml logs telegram-bot -f
 
 dev-build:
 	@echo "🔨 Building development image..."
@@ -106,7 +106,7 @@ prod-stop:
 	@echo "✅ Production environment stopped"
 
 prod-logs:
-	docker compose -f docker-compose.prod.yml logs -f
+	docker compose -f docker-compose.prod.yml logs telegram-bot -f
 
 prod-build:
 	@echo "🔨 Building production image..."
