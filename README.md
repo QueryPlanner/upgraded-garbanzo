@@ -1,21 +1,27 @@
-# Google ADK on Bare Metal
+# Garbanzo 🌱
 
-A **production-ready template** for building and deploying Google ADK agents on your own infrastructure (bare metal, VPS, or private cloud) without the complexity or lock-in of heavy cloud providers.
+A **personal AI assistant** built on Google ADK with Telegram integration. Deploy anywhere—bare metal, VPS, or private cloud—without the complexity or lock-in of heavy cloud providers.
 
 > **Note:** This project uses a context system for agent identity and bootstrapping. See `.context/` directory for details.
 
-**Philosophy**
-We believe you should own your agents. This template is designed to strip away the "cloud magic" and give you a clean, performant, and observable foundation that runs anywhere—from a $5/mo VPS to a Raspberry Pi cluster.
+## What Can Garbanzo Do?
+
+- **💬 Chat via Telegram** - Natural conversations with your personal AI assistant
+- **⏰ Smart Reminders** - Schedule one-time or recurring reminders using natural language
+- **🏋️ Fitness Tracking** - Log calories, workouts, and view statistics
+- **🔍 Web Search** - Search the web with Brave Search integration
+- **📄 Context Files** - Secure read/write operations for notes and documents
+- **🎬 YouTube Transcripts** - Extract transcripts from YouTube videos
+- **🛠️ Shell Commands** - Execute bash commands (Docker environment)
+- **🔌 MCP Tools** - Extensible via Model Context Protocol
 
 ## Key Features
 
-- 🐳 **Deploy Anywhere**: Pre-configured Docker & Compose setup. Runs on Hetzner, DigitalOcean, or your basement server.
-- 🛠️ **Automated Setup**: Includes a `setup.sh` script to harden your server (UFW, Fail2Ban) and install dependencies in minutes.
-- 🔄 **CI/CD Included**: GitHub Actions workflow builds multi-arch images (AMD64/ARM64) and pushes to GHCR automatically.
-- 🔭 **Open Observability**: Built-in OpenTelemetry (OTel) instrumentation. Pre-configured for **Langfuse**, but easily adaptable to Jaeger, Prometheus, or any OTel-compatible backend.
+- 🐳 **Deploy Anywhere**: Pre-configured Docker setup. Runs on Hetzner, DigitalOcean, or your basement server.
+- 🔄 **Multi-Environment**: Run dev and prod simultaneously with isolated configs and volumes.
+- 🔭 **Open Observability**: Built-in OpenTelemetry instrumentation with Langfuse support.
 - 🚀 **Modern Stack**: Python 3.13, `uv`, `fastapi`, `asyncpg`.
-- 💾 **Production Persistence**: Postgres-backed sessions, reminders, and fitness data.
-- ⏰ **Smart Reminders**: Schedule reminders via natural language with Telegram push notifications.
+- 💾 **Production Persistence**: Postgres-backed sessions with SQLite for reminders and fitness data.
 
 ## Quickstart
 
