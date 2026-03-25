@@ -24,6 +24,10 @@ services:
       dockerfile: Dockerfile
       tags:
         - garbanzo-prod:latest
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - garbanzo-prod:latest
     container_name: garbanzo-prod-bot
     env_file:
       - .env.prod
