@@ -3,21 +3,14 @@
 # =============================================================================
 # Quick commands for managing development and production environments.
 #
-# Service Profiles:
-#   --profile bot   - Telegram bot only (polls Telegram, no port needed)
-#   --profile api   - FastAPI web server only (exposes port)
-#   --profile all   - Both bot and API services
-#
 # Usage:
 #   make dev          - Start dev bot (default)
-#   make dev-api      - Start dev API server on port 3001
-#   make dev-all      - Start dev bot + API
+#   make dev-all      - Start dev bot + API (port 3001)
 #   make prod         - Start prod bot (default)
-#   make prod-api     - Start prod API server on port 3000
-#   make prod-all     - Start prod bot + API
+#   make prod-all     - Start prod bot + API (port 3000)
 # =============================================================================
 
-.PHONY: help dev dev-bot dev-api dev-all prod prod-bot prod-api prod-all
+.PHONY: help dev dev-bot dev-all prod prod-bot prod-all
 .PHONY: dev-stop prod-stop dev-logs prod-logs dev-build prod-build
 .PHONY: all-up all-down status clean dev-clean prod-clean
 
@@ -26,21 +19,19 @@ help:
 	@echo "Garbanzo Multi-Environment Docker Commands"
 	@echo "=========================================="
 	@echo ""
-	@echo "Development Environment (DEBUG logging, port 3001 for API):"
-	@echo "  make dev          - Start development bot (default)"
-	@echo "  make dev-bot      - Start development bot only"
-	@echo "  make dev-api      - Start development API only (port 3001)"
-	@echo "  make dev-all      - Start both dev bot and API"
+	@echo "Development Environment (DEBUG logging):"
+	@echo "  make dev          - Start development bot"
+	@echo "  make dev-bot      - Same as 'make dev'"
+	@echo "  make dev-all      - Start dev bot + API (port 3001)"
 	@echo "  make dev-stop     - Stop development environment"
 	@echo "  make dev-logs     - View development logs (follow mode)"
 	@echo "  make dev-build    - Rebuild development image"
 	@echo "  make dev-shell    - Open shell in development container"
 	@echo ""
-	@echo "Production Environment (INFO logging, port 3000 for API):"
-	@echo "  make prod         - Start production bot (default)"
-	@echo "  make prod-bot     - Start production bot only"
-	@echo "  make prod-api     - Start production API only (port 3000)"
-	@echo "  make prod-all     - Start both prod bot and API"
+	@echo "Production Environment (INFO logging):"
+	@echo "  make prod         - Start production bot"
+	@echo "  make prod-bot     - Same as 'make prod'"
+	@echo "  make prod-all     - Start prod bot + API (port 3000)"
 	@echo "  make prod-stop    - Stop production environment"
 	@echo "  make prod-logs    - View production logs (follow mode)"
 	@echo "  make prod-build   - Rebuild production image"
@@ -66,12 +57,6 @@ dev-bot:
 	docker compose -f docker-compose.dev.yml --profile bot up -d
 	@echo "✅ Development bot running"
 	@echo "📊 View logs: make dev-logs"
-
-dev-api:
-	@echo "🚀 Starting development API on port 3001..."
-	docker compose -f docker-compose.dev.yml --profile api up -d
-	@echo "✅ Development API running"
-	@echo "🔍 Health check: curl http://localhost:3001/health"
 
 dev-all:
 	@echo "🚀 Starting development bot and API..."
@@ -107,12 +92,6 @@ prod-bot:
 	docker compose -f docker-compose.prod.yml --profile bot up -d
 	@echo "✅ Production bot running"
 	@echo "📊 View logs: make prod-logs"
-
-prod-api:
-	@echo "🚀 Starting production API on port 3000..."
-	docker compose -f docker-compose.prod.yml --profile api up -d
-	@echo "✅ Production API running"
-	@echo "🔍 Health check: curl http://localhost:3000/health"
 
 prod-all:
 	@echo "🚀 Starting production bot and API..."

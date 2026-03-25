@@ -78,7 +78,6 @@ services:
       - "service=api"
     command: python -m agent.server
     profiles:
-      - api
       - all
 
 volumes:

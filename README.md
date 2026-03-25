@@ -113,14 +113,10 @@ Run **development** and **production** environments simultaneously on the same m
 
 | Command | Description |
 | :--- | :--- |
-| `make dev` | Start development bot (default) |
-| `make dev-bot` | Start development Telegram bot |
-| `make dev-api` | Start development API server (port 3001) |
-| `make dev-all` | Start development bot + API |
-| `make prod` | Start production bot (default) |
-| `make prod-bot` | Start production Telegram bot |
-| `make prod-api` | Start production API server (port 3000) |
-| `make prod-all` | Start production bot + API |
+| `make dev` | Start development bot |
+| `make dev-all` | Start dev bot + API (port 3001) |
+| `make prod` | Start production bot |
+| `make prod-all` | Start prod bot + API (port 3000) |
 | `make dev-stop` | Stop development environment |
 | `make prod-stop` | Stop production environment |
 | `make dev-logs` | View development logs (follow mode) |
@@ -139,19 +135,13 @@ If you prefer direct Docker Compose commands:
 # Development Bot
 docker compose -f docker-compose.dev.yml --profile bot up -d
 
-# Development API Server (port 3001)
-docker compose -f docker-compose.dev.yml --profile api up -d
-
-# Development Both Services
+# Development Bot + API (port 3001)
 docker compose -f docker-compose.dev.yml --profile all up -d
 
 # Production Bot
 docker compose -f docker-compose.prod.yml --profile bot up -d
 
-# Production API Server (port 3000)
-docker compose -f docker-compose.prod.yml --profile api up -d
-
-# Production Both Services
+# Production Bot + API (port 3000)
 docker compose -f docker-compose.prod.yml --profile all up -d
 
 # Stop any environment
