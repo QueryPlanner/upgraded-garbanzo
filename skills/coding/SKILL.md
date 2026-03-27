@@ -33,7 +33,7 @@ Always export these before running Claude Code:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="sk-1234567890"
+export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
 ```
 
 ### Required Flags
@@ -46,7 +46,7 @@ Always include these flags:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="sk-1234567890"
+export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
 
 claude -p "your prompt here" --output-format text --model glm-5 --dangerously-skip-permissions
 ```
@@ -67,24 +67,25 @@ For long-running coding tasks, run in background:
 ```bash
 # Export environment variables
 export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="sk-1234567890"
+export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
 
 # Save output to a log file for later review
+TASK_ID=$(date +%Y%m%d-%H%M%S)
 nohup claude -p "Fix issue #123: implement user authentication" \
   --output-format text \
   --model glm-5 \
   --dangerously-skip-permissions \
-  > /app/memory/coding-task-$(date +%Y%m%d-%H%M%S).log 2>&1 &
+  > /app/memory/coding-task-${TASK_ID}.log 2>&1 &
 
 # Capture the PID for tracking
-echo $! > /app/memory/coding-task.pid
+echo $! > /app/memory/coding-task-${TASK_ID}.pid
 ```
 
 ### Checking Progress
 
 ```bash
 # Check if process is still running
-ps aux | grep -E "claude.*coding-task" || echo "No active coding task"
+ps aux | grep '[c]laude -p' || echo "No active coding task"
 
 # View latest log
 ls -t /app/memory/coding-task-*.log | head -1 | xargs tail -50
@@ -137,7 +138,7 @@ Use Claude Code print mode with a structured prompt:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="sk-1234567890"
+export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
 
 claude -p "
 You are implementing GitHub issue #<number>.
@@ -205,8 +206,8 @@ For coding tasks, specify a longer timeout:
 ```bash
 # Via docker_bash_execute tool
 docker_bash_execute(
-    command="export ANTHROPIC_BASE_URL='http://0.0.0.0:4000' && export ANTHROPIC_AUTH_TOKEN='sk-1234567890' && claude -p '...' --model glm-5 --dangerously-skip-permissions",
-    timeout_seconds=1800  # 30 minutes
+    command="export ANTHROPIC_BASE_URL='http://0.0.0.0:4000' && export ANTHROPIC_AUTH_TOKEN='<YOUR_ANTHROPIC_AUTH_TOKEN>' && claude -p '...' --model glm-5 --dangerously-skip-permissions",
+    timeout_seconds=300  # 5 minutes
 )
 ```
 
@@ -246,7 +247,7 @@ npm test  # or pytest, cargo test, etc.
 
 # Fix interactively if needed
 export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="sk-1234567890"
+export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
 claude -p "Tests are failing with: <error>. Fix the tests." --model glm-5 --dangerously-skip-permissions
 ```
 
