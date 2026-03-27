@@ -20,16 +20,8 @@ fix bugs, or create PRs at any time.
 ## Workflow Overview
 
 ```
-User requests coding task -> You work on it -> PR created (if applicable)
+User requests coding task -> You work on it -> PR created -> CI checks verified
 ```
-
-## Claude Code Integration
-
-Claude Code is integrated via the `run_claude_coding_task` tool. This is an asynchronous, long-running tool that will free you up to do other tasks while Claude Code autonomously implements the requested changes.
-
-### Required Environment Variables
-
-The `run_claude_coding_task` tool automatically injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from your environment. **You do not need to manually export these.**
 
 ## Issue-to-PR Workflow
 
@@ -64,9 +56,9 @@ git checkout -b issue-<number>-<short-description>
 
 ### Step 3: Delegate to Claude Code Tool
 
-Use the `run_claude_coding_task` tool with a structured prompt. This tool will run asynchronously and can take 20-30 minutes. The framework will return a pending status to you and notify you once it completes.
+Use the `run_claude_coding_task` tool with a structured prompt.
 
-**Example usage of `run_claude_coding_task`:**
+**Example usage:**
 ```python
 run_claude_coding_task(
     prompt="""
@@ -93,9 +85,9 @@ Work autonomously. Use the tools available.
 )
 ```
 
-### Step 4: Review Changes (Once the Tool Completes)
+### Step 4: Review Changes
 
-When the `run_claude_coding_task` returns its output asynchronously, check what was done:
+Review the local changes before pushing:
 
 ```bash
 # Check what was changed
@@ -129,6 +121,28 @@ Closes #<number>
 Implemented by Garbanzo"
 ```
 
+### Step 6: Verify CI Validation Checks
+
+Wait a couple of minutes after creating the PR, then check the PR CI validation checks.
+
+```bash
+gh pr checks
+```
+
+You do not need to verify the actual logic, just ensure the tests and CI checks pass. 
+**If any checks fail, or if anything is missing, run the `run_claude_coding_task` tool again** to fix the issues. Repeat this verification step until all CI validation checks pass.
+
+## Coding Practices & Best Practices
+
+1. **Start from clean main** - Always `git reset --hard origin/main` and `git clean -fd` before creating a branch.
+2. **Clean up stale branches** - Remove merged branches to keep the workspace tidy.
+3. **Create descriptive branch names**: e.g., `issue-123-add-user-auth`.
+4. **Keep commits atomic** and well-scoped.
+5. **Run tests** locally before pushing, and ensure CI passes after pushing.
+6. **Don't force push** - if something goes wrong, create a new branch or add a new commit.
+7. **Never push directly to main** - always use feature branches.
+8. **Don't merge your own PRs** - user reviews them.
+
 ## Error Handling
 
 ### Claude Code Fails
@@ -143,17 +157,18 @@ If `run_claude_coding_task` returns an error status:
 # Run tests manually to see full output
 npm test  # or pytest, cargo test, etc.
 ```
-If tests fail, you can call `run_claude_coding_task` again with a prompt like:
+If tests fail locally or in CI, call `run_claude_coding_task` again with a prompt like:
 `"Tests are failing with: <error>. Fix the tests."`
 
 ## Status Updates to User
 
-After completing (or failing) the work, send a summary:
+After completing the workflow and verifying CI, send a summary:
 
 1. **What issue**: Issue #X - Title
 2. **What was done**: Summary of changes
-3. **PR link**: URL to the created PR (or "pending review" if not created)
-4. **Any blockers**: Issues encountered that need user attention
+3. **PR link**: URL to the created PR
+4. **CI Status**: Confirmed passing checks
+5. **Any blockers**: Issues encountered that need user attention
 
 Store the status in memory for retrieval:
 
@@ -179,7 +194,7 @@ printf '\n## Coding Task - %s\n\n- **Issue**: #%d - %s\n- **Status**: %s\n- **PR
 3. Reset to clean main: `git reset --hard origin/main && git clean -fd`
 4. Create fresh branch `issue-42-<short-desc>`
 5. Call `run_claude_coding_task`
-6. *Wait for the async tool to return*
-7. Review the changes
-8. Push and create PR
-9. Send summary: "Issue #42 complete! PR created: <url>"
+6. Review the local changes
+7. Push and create PR
+8. Wait and verify CI checks pass (run Claude again if they fail)
+9. Send summary: "Issue #42 complete! PR created: <url> and CI checks passed."
