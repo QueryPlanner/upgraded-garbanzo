@@ -399,6 +399,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     asyncio.create_task(_send_typing_indicator())
 
     try:
+
         async def _send_live_text_chunk(chunk_text: str) -> None:
             """Forward visible model text to Telegram as it arrives."""
             if not chunk_text.strip():
