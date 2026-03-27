@@ -1263,3 +1263,118 @@ class TestTelegramPathValidation:
     def test_validate_download_filename_dot_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid text_file_name"):
             _validate_single_download_filename(".")
+
+
+@pytest.mark.asyncio
+@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("asyncio.create_subprocess_exec")
+@patch("os.environ.copy")
+async def test_run_claude_coding_task_success(
+    mock_env_copy: MagicMock,
+    mock_create_subprocess_exec: AsyncMock,
+    mock_runs_inside_docker: MagicMock,
+    mock_tool_context: MagicMock,
+) -> None:
+    """Test successful execution of run_claude_coding_task."""
+    mock_env_copy.return_value = {
+        "ANTHROPIC_BASE_URL": "http://localhost:4000",
+        "ANTHROPIC_AUTH_TOKEN": "test-token",
+    }
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate.return_value = (b"claude output", b"")
+    mock_create_subprocess_exec.return_value = mock_proc
+
+    from agent.tools import run_claude_coding_task
+
+    result = await run_claude_coding_task(
+        tool_context=mock_tool_context, prompt="Fix the bug", workdir="/app/workspace"
+    )
+
+    assert result["status"] == "success"
+    assert result["exit_code"] == 0
+    assert result["stdout"] == "claude output"
+    assert result["stderr"] == ""
+    assert result["truncated"] is False
+
+    mock_create_subprocess_exec.assert_called_once_with(
+        "claude",
+        "-p",
+        "Fix the bug",
+        "--model",
+        "glm-5",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "text",
+        cwd=str(Path.cwd()),
+        env=mock_env_copy.return_value,
+        stdout=-1,
+        stderr=-1,
+    )
+
+
+@pytest.mark.asyncio
+@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("os.environ.copy")
+async def test_run_claude_coding_task_missing_env(
+    mock_env_copy: MagicMock,
+    mock_runs_inside_docker: MagicMock,
+    mock_tool_context: MagicMock,
+) -> None:
+    """Test failure when environment variables are missing."""
+    mock_env_copy.return_value = {}
+
+    from agent.tools import run_claude_coding_task
+
+    result = await run_claude_coding_task(
+        tool_context=mock_tool_context, prompt="Fix the bug"
+    )
+
+    assert result["status"] == "error"
+    assert "Missing ANTHROPIC_BASE_URL" in result["message"]
+
+
+@pytest.mark.asyncio
+@patch("agent.tools._agent_runs_inside_docker", return_value=False)
+async def test_run_claude_coding_task_outside_docker(
+    mock_runs_inside_docker: MagicMock,
+    mock_tool_context: MagicMock,
+) -> None:
+    """Test failure when running outside Docker."""
+    from agent.tools import run_claude_coding_task
+
+    result = await run_claude_coding_task(
+        tool_context=mock_tool_context, prompt="Fix the bug"
+    )
+
+    assert result["status"] == "error"
+    assert "disabled outside Docker" in result["message"]
+
+
+@pytest.mark.asyncio
+@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("asyncio.create_subprocess_exec")
+@patch("os.environ.copy")
+async def test_run_claude_coding_task_exception(
+    mock_env_copy: MagicMock,
+    mock_create_subprocess_exec: AsyncMock,
+    mock_runs_inside_docker: MagicMock,
+    mock_tool_context: MagicMock,
+) -> None:
+    """Test exception handling in run_claude_coding_task."""
+    mock_env_copy.return_value = {
+        "ANTHROPIC_BASE_URL": "http://localhost:4000",
+        "ANTHROPIC_AUTH_TOKEN": "test-token",
+    }
+
+    mock_create_subprocess_exec.side_effect = Exception("Test Error")
+
+    from agent.tools import run_claude_coding_task
+
+    result = await run_claude_coding_task(
+        tool_context=mock_tool_context, prompt="Fix the bug"
+    )
+
+    assert result["status"] == "error"
+    assert "Failed to execute Claude Code: Test Error" in result["message"]

@@ -1765,3 +1765,88 @@ def list_context_files(
     except Exception as e:
         logger.exception("Failed to list context files")
         return {"status": "error", "message": f"Failed to list files: {e}"}
+
+
+async def run_claude_coding_task(
+    tool_context: ToolContext,  # noqa: ARG001
+    prompt: str,
+    workdir: str | None = None,
+) -> dict[str, Any]:
+    """Run a long-running Claude Code task to resolve coding issues/features.
+
+    This tool is designed to take a significant amount of time (up to hours) to complete
+    as it autonomously implements features and fixes bugs. Once the task finishes, the
+    result will be returned asynchronously.
+
+    Available only when the agent process runs in Docker (``/.dockerenv``).
+
+    Args:
+        tool_context: ADK ToolContext (unused; required by ADK).
+        prompt: Instructions for Claude. Include issue details, requirements, etc.
+        workdir: Directory to run in (default: /home/app/garbanzo-home/workspace)
+    """
+    if not _agent_runs_inside_docker():
+        return {
+            "status": "error",
+            "message": "run_claude_coding_task is disabled outside Docker.",
+        }
+
+    # Setup environment
+    env = os.environ.copy()
+
+    anthropic_base_url = env.get("ANTHROPIC_BASE_URL")
+    anthropic_auth_token = env.get("ANTHROPIC_AUTH_TOKEN")
+
+    if not anthropic_base_url or not anthropic_auth_token:
+        return {
+            "status": "error",
+            "message": "Missing ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN in env.",
+        }
+
+    cwd = workdir or str(Path("/home/app/garbanzo-home/workspace"))
+    if not Path(cwd).is_dir():
+        cwd = str(Path.cwd())
+
+    logger.info(
+        "run_claude_coding_task: Starting Claude with prompt length %d in %s",
+        len(prompt),
+        cwd,
+    )
+
+    cmd = [
+        "claude",
+        "-p",
+        prompt,
+        "--model",
+        "glm-5",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "text",
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout_b, stderr_b = await proc.communicate()
+        exit_code = proc.returncode
+
+        out_max = _DOCKER_BASH_MAX_COMBINED_OUTPUT_BYTES // 2
+        stdout_text, out_trunc = _truncate_output(stdout_b, out_max)
+        stderr_text, err_trunc = _truncate_output(stderr_b, out_max)
+
+        return {
+            "status": "success" if exit_code == 0 else "error",
+            "exit_code": exit_code,
+            "stdout": stdout_text,
+            "stderr": stderr_text,
+            "truncated": out_trunc or err_trunc,
+        }
+    except Exception as e:
+        logger.exception("run_claude_coding_task failed")
+        return {"status": "error", "message": f"Failed to execute Claude Code: {e}"}

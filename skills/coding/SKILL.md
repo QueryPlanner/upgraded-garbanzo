@@ -23,73 +23,13 @@ fix bugs, or create PRs at any time.
 User requests coding task -> You work on it -> PR created (if applicable)
 ```
 
-## Claude Code CLI Usage
+## Claude Code Integration
 
-Claude Code is installed in Docker. Use **non-interactive print mode** for automation.
+Claude Code is integrated via the `run_claude_coding_task` tool. This is an asynchronous, long-running tool that will free you up to do other tasks while Claude Code autonomously implements the requested changes.
 
 ### Required Environment Variables
 
-Always export these before running Claude Code:
-
-```bash
-export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
-```
-
-### Required Flags
-
-Always include these flags:
-- `--model glm-5`: Use the configured model
-- `--dangerously-skip-permissions`: Skip permission prompts for automation
-
-### Print Mode (Recommended)
-
-```bash
-export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
-
-claude -p "your prompt here" --output-format text --model glm-5 --dangerously-skip-permissions
-```
-
-This runs Claude Code non-interactively and returns output to stdout.
-
-### Additional Flags
-
-- `-p, --print`: Non-interactive mode (required for automation)
-- `--output-format text|json`: Output format (default: text)
-- `--max-tokens N`: Limit response length
-- `--timeout N`: Timeout in seconds (use for long tasks)
-
-### Background Execution
-
-For long-running coding tasks, run in background:
-
-```bash
-# Export environment variables
-export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
-
-# Save output to a log file for later review
-TASK_ID=$(date +%Y%m%d-%H%M%S)
-nohup claude -p "Fix issue #123: implement user authentication" \
-  --output-format text \
-  --model glm-5 \
-  --dangerously-skip-permissions \
-  > /app/memory/coding-task-${TASK_ID}.log 2>&1 &
-
-# Capture the PID for tracking
-echo $! > /app/memory/coding-task-${TASK_ID}.pid
-```
-
-### Checking Progress
-
-```bash
-# Check if process is still running
-ps aux | grep '[c]laude -p' || echo "No active coding task"
-
-# View latest log
-ls -t /app/memory/coding-task-*.log | head -1 | xargs tail -50
-```
+The `run_claude_coding_task` tool automatically injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from your environment. **You do not need to manually export these.**
 
 ## Issue-to-PR Workflow
 
@@ -98,10 +38,6 @@ ls -t /app/memory/coding-task-*.log | head -1 | xargs tail -50
 ```bash
 # Using GitHub CLI (gh must be authenticated)
 gh issue view <issue_number> --json title,body,labels,repository
-
-# Or via API if gh not available
-curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/owner/repo/issues/<issue_number>"
 ```
 
 ### Step 2: Prepare Workspace
@@ -126,21 +62,14 @@ git branch --merged main | grep -v "^\* main$" | xargs -r git branch -d
 git checkout -b issue-<number>-<short-description>
 ```
 
-**Why this matters:**
-- Previous branches may leave untracked files
-- Local main can diverge from origin/main
-- Stale branches accumulate and cause confusion
-- Clean slate prevents "works on my machine" issues
+### Step 3: Delegate to Claude Code Tool
 
-### Step 3: Delegate to Claude Code
+Use the `run_claude_coding_task` tool with a structured prompt. This tool will run asynchronously and can take 20-30 minutes. The framework will return a pending status to you and notify you once it completes.
 
-Use Claude Code print mode with a structured prompt:
-
-```bash
-export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
-
-claude -p "
+**Example usage of `run_claude_coding_task`:**
+```python
+run_claude_coding_task(
+    prompt="""
 You are implementing GitHub issue #<number>.
 
 Issue Title: <title>
@@ -158,11 +87,15 @@ Requirements:
 5. Commit with a clear message following conventional commits
 6. Do NOT push or create PR (I will review first)
 
-Work autonomously. Use the tools available (Read, Write, Edit, Bash for tests).
-" --output-format text --model glm-5 --dangerously-skip-permissions 2>&1 | tee /app/memory/issue-<number>-work.log
+Work autonomously. Use the tools available.
+""",
+    workdir="/home/app/garbanzo-home/workspace/<repo_name>"
+)
 ```
 
-### Step 4: Review Changes
+### Step 4: Review Changes (Once the Tool Completes)
+
+When the `run_claude_coding_task` returns its output asynchronously, check what was done:
 
 ```bash
 # Check what was changed
@@ -196,73 +129,22 @@ Closes #<number>
 Implemented by Garbanzo"
 ```
 
-## Timing Considerations
-
-### Default Timeout
-
-Claude Code tasks can run long. Default timeout for `docker_bash_execute` is 60 seconds.
-For coding tasks, specify a longer timeout:
-
-```bash
-# Via docker_bash_execute tool
-docker_bash_execute(
-    command="export ANTHROPIC_BASE_URL='http://0.0.0.0:4000' && export ANTHROPIC_AUTH_TOKEN='<YOUR_ANTHROPIC_AUTH_TOKEN>' && claude -p '...' --model glm-5 --dangerously-skip-permissions",
-    timeout_seconds=300  # 5 minutes
-)
-```
-
-### Recommended Timeouts by Task Type
-
-| Task Type | Recommended Timeout |
-|-----------|-------------------|
-| Quick fix (typo, small bug) | 5 minutes (300s) |
-| Feature implementation | 15-30 minutes (900-1800s) |
-| Complex refactor | 30-60 minutes (1800-3600s) |
-
-### Maximum Limits
-
-- `docker_bash_execute` max: 300 seconds (5 minutes)
-- For longer tasks, use `nohup` + background execution
-- Check progress periodically via log files
-
 ## Error Handling
 
 ### Claude Code Fails
 
-```bash
-# Check the log for errors
-tail -100 /app/memory/issue-<number>-work.log
-
-# Common issues:
-# - File not found: repo not cloned correctly
-# - Permission denied: check git credentials
-# - Timeout: task too complex, split into smaller pieces
-```
+If `run_claude_coding_task` returns an error status:
+- Read the provided `stdout` and `stderr` from the tool's result.
+- Common issues: File not found (repo not cloned correctly), Timeout (task too complex).
 
 ### Tests Fail
 
 ```bash
 # Run tests manually to see full output
 npm test  # or pytest, cargo test, etc.
-
-# Fix interactively if needed
-export ANTHROPIC_BASE_URL="http://0.0.0.0:4000"
-export ANTHROPIC_AUTH_TOKEN="<YOUR_ANTHROPIC_AUTH_TOKEN>"
-claude -p "Tests are failing with: <error>. Fix the tests." --model glm-5 --dangerously-skip-permissions
 ```
-
-### PR Creation Fails
-
-```bash
-# Check gh authentication
-gh auth status
-
-# Check branch exists remotely
-git branch -r | grep issue-
-
-# Manual PR creation
-gh pr create --web  # opens browser (if headed mode)
-```
+If tests fail, you can call `run_claude_coding_task` again with a prompt like:
+`"Tests are failing with: <error>. Fix the tests."`
 
 ## Status Updates to User
 
@@ -287,25 +169,6 @@ printf '\n## Coding Task - %s\n\n- **Issue**: #%d - %s\n- **Status**: %s\n- **PR
   >> /app/memory/MEMORY.md
 ```
 
-## Best Practices
-
-1. **Start from clean main** - Always `git reset --hard origin/main` and `git clean -fd` before creating a branch
-2. **Clean up stale branches** - Remove merged branches to keep the workspace tidy
-3. **Create descriptive branch names**: `issue-123-add-user-auth`
-4. **Keep commits atomic** and well-scoped
-5. **Run tests** before pushing
-6. **Don't force push** - if something goes wrong, create a new branch
-7. **Log everything** - save output to files for debugging
-8. **Set expectations** - tell the user what you'll do before starting
-
-## Restrictions
-
-- **Never push directly to main** - always use feature branches
-- **Never force push** to shared branches
-- **Don't merge your own PRs** - user reviews them
-- **Don't delete branches** until PR is merged
-- **Don't commit secrets** - check for .env files, tokens, etc.
-
 ## Example Interactions
 
 **User**: "Work on issue #42"
@@ -314,20 +177,9 @@ printf '\n## Coding Task - %s\n\n- **Issue**: #%d - %s\n- **Status**: %s\n- **PR
 1. Fetch issue #42 details
 2. Clone/navigate to the repo
 3. Reset to clean main: `git reset --hard origin/main && git clean -fd`
-4. Clean up stale branches: `git branch --merged main | grep -v main | xargs -r git branch -d`
-5. Create fresh branch `issue-42-<short-desc>`
-6. Run Claude Code in print mode to implement the fix
+4. Create fresh branch `issue-42-<short-desc>`
+5. Call `run_claude_coding_task`
+6. *Wait for the async tool to return*
 7. Review the changes
 8. Push and create PR
 9. Send summary: "Issue #42 complete! PR created: <url>"
-
-**User**: "Fix the bug in the auth module"
-
-**Your response**:
-1. Navigate to the relevant repo
-2. Reset to clean main: `git reset --hard origin/main && git clean -fd`
-3. Create fresh branch `fix-auth-bug`
-4. Use Claude Code to understand and fix the bug
-5. Run tests to verify
-6. Commit and push
-7. Send summary of what was fixed
