@@ -369,6 +369,36 @@ class TestHandleMessage:
             )
 
     @pytest.mark.asyncio
+    async def test_forwards_streamed_text_chunks_without_duplicate_final_send(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """Visible mid-turn text should be delivered immediately and not resent."""
+
+        async def mock_process_message(**kwargs: object) -> TelegramAgentReply:
+            on_text_chunk = kwargs["on_text_chunk"]
+            assert callable(on_text_chunk)
+            await on_text_chunk("First streamed chunk.")
+            await on_text_chunk("Second streamed chunk.")
+            return TelegramAgentReply(
+                text="First streamed chunk.Second streamed chunk.",
+                streamed_text=True,
+            )
+
+        with patch(
+            "agent.telegram.bot.process_message",
+            side_effect=mock_process_message,
+        ):
+            await handle_message(mock_update, mock_context)
+
+        assert mock_update.message.reply_text.call_count == 2
+        first_call = mock_update.message.reply_text.call_args_list[0]
+        second_call = mock_update.message.reply_text.call_args_list[1]
+        assert first_call.args[0] == "First streamed chunk."
+        assert second_call.args[0] == "Second streamed chunk."
+        assert first_call.kwargs["parse_mode"] == ParseMode.HTML
+        assert second_call.kwargs["parse_mode"] == ParseMode.HTML
+
+    @pytest.mark.asyncio
     async def test_retries_without_markdown_when_telegram_rejects_chunk(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:

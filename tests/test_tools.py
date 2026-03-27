@@ -1277,6 +1277,7 @@ async def test_run_claude_coding_task_success(
 ) -> None:
     """Test successful execution of run_claude_coding_task."""
     mock_env_copy.return_value = {
+        "PATH": "/usr/bin",
         "ANTHROPIC_BASE_URL": "http://localhost:4000",
         "ANTHROPIC_AUTH_TOKEN": "test-token",
     }
@@ -1308,7 +1309,11 @@ async def test_run_claude_coding_task_success(
         "--output-format",
         "text",
         cwd=str(Path.cwd()),
-        env=mock_env_copy.return_value,
+        env={
+            "PATH": "/usr/bin",
+            "ANTHROPIC_BASE_URL": "http://localhost:4000",
+            "ANTHROPIC_AUTH_TOKEN": "test-token",
+        },
         stdout=-1,
         stderr=-1,
     )
@@ -1316,14 +1321,80 @@ async def test_run_claude_coding_task_success(
 
 @pytest.mark.asyncio
 @patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("agent.tools._start_background_claude_job", return_value="job-1234")
 @patch("os.environ.copy")
-async def test_run_claude_coding_task_missing_env(
+async def test_run_claude_coding_task_starts_background_job_for_telegram_user(
+    mock_env_copy: MagicMock,
+    mock_start_background_job: MagicMock,
+    mock_runs_inside_docker: MagicMock,
+) -> None:
+    """Telegram users should get a non-blocking Claude job."""
+    mock_env_copy.return_value = {
+        "PATH": "/usr/bin",
+        "ANTHROPIC_BASE_URL": "http://localhost:4000",
+        "ANTHROPIC_AUTH_TOKEN": "test-token",
+    }
+    tool_context = MockToolContext(state=MockState({"user_id": "12345"}))
+
+    from agent.tools import run_claude_coding_task
+
+    result = await run_claude_coding_task(
+        tool_context=tool_context,
+        prompt="Fix the bug",
+        workdir="/app/workspace",
+    )
+
+    assert result["status"] == "started"
+    assert result["job_id"] == "job-1234"
+    assert "keep chatting" in result["message"]
+    mock_start_background_job.assert_called_once_with(
+        chat_id="12345",
+        prompt="Fix the bug",
+        cwd=str(Path.cwd()),
+        env={
+            "PATH": "/usr/bin",
+            "ANTHROPIC_BASE_URL": "http://localhost:4000",
+            "ANTHROPIC_AUTH_TOKEN": "test-token",
+        },
+    )
+
+
+@pytest.mark.asyncio
+@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("os.environ.copy")
+async def test_build_claude_subprocess_env_preserves_process_env(
     mock_env_copy: MagicMock,
     mock_runs_inside_docker: MagicMock,
     mock_tool_context: MagicMock,
 ) -> None:
-    """Test failure when environment variables are missing."""
-    mock_env_copy.return_value = {}
+    """Claude subprocess env is a copy of the process env (Anthropic from env)."""
+    _ = mock_runs_inside_docker
+    _ = mock_tool_context
+    mock_env_copy.return_value = {
+        "HOME": "/app",
+        "ANTHROPIC_BASE_URL": "http://host.example:4000",
+        "ANTHROPIC_AUTH_TOKEN": "secret-from-env",
+    }
+
+    from agent.tools import _build_claude_subprocess_env
+
+    env = _build_claude_subprocess_env()
+
+    assert env["HOME"] == "/app"
+    assert env["ANTHROPIC_BASE_URL"] == "http://host.example:4000"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "secret-from-env"
+
+
+@pytest.mark.asyncio
+@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("os.environ.copy")
+async def test_run_claude_coding_task_missing_anthropic_env(
+    mock_env_copy: MagicMock,
+    mock_runs_inside_docker: MagicMock,
+    mock_tool_context: MagicMock,
+) -> None:
+    """Fail when ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is not set."""
+    mock_env_copy.return_value = {"PATH": "/usr/bin"}
 
     from agent.tools import run_claude_coding_task
 
@@ -1364,6 +1435,7 @@ async def test_run_claude_coding_task_exception(
 ) -> None:
     """Test exception handling in run_claude_coding_task."""
     mock_env_copy.return_value = {
+        "PATH": "/usr/bin",
         "ANTHROPIC_BASE_URL": "http://localhost:4000",
         "ANTHROPIC_AUTH_TOKEN": "test-token",
     }
@@ -1378,3 +1450,38 @@ async def test_run_claude_coding_task_exception(
 
     assert result["status"] == "error"
     assert "Failed to execute Claude Code: Test Error" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_send_background_claude_job_result_posts_completion_messages() -> None:
+    """Finished Claude jobs should post their result back to Telegram."""
+    mock_bot = MagicMock()
+    mock_bot.send_message = AsyncMock()
+    mock_notification_service = MagicMock()
+    mock_notification_service._bot = mock_bot
+    mock_notification_service.bot = mock_bot
+
+    from agent.tools import _send_background_claude_job_result
+
+    with patch(
+        "agent.telegram.notifications.get_notification_service",
+        return_value=mock_notification_service,
+    ):
+        await _send_background_claude_job_result(
+            chat_id="12345",
+            job_id="job-1234",
+            cwd="/app/workspace",
+            result={
+                "status": "success",
+                "exit_code": 0,
+                "stdout": "fixed the issue",
+                "stderr": "",
+                "truncated": False,
+            },
+        )
+
+    assert mock_bot.send_message.call_count == 2
+    summary_call = mock_bot.send_message.call_args_list[0]
+    stdout_call = mock_bot.send_message.call_args_list[1]
+    assert "Claude job `job-1234` finished." in summary_call.kwargs["text"]
+    assert "fixed the issue" in stdout_call.kwargs["text"]

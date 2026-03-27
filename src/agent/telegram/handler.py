@@ -8,7 +8,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -65,6 +65,7 @@ class TelegramAgentReply:
     text: str
     documents: tuple[PendingTelegramFile, ...] = field(default_factory=tuple)
     superseded: bool = False
+    streamed_text: bool = False
 
 
 class TelegramTurnSupersededError(asyncio.CancelledError):
@@ -303,6 +304,7 @@ class TelegramHandler:
         message: str,
         session_id: str | None = None,
         force_litellm_model: str | None = None,
+        on_text_chunk: Callable[[str], Awaitable[None]] | None = None,
     ) -> TelegramAgentReply:
         """Process a message through the ADK agent.
 
@@ -313,6 +315,8 @@ class TelegramHandler:
                 If not provided, user_id is used as session_id.
             force_litellm_model: When set (e.g. reminder delivery), use this
                 LiteLLM model id instead of reading from session state.
+            on_text_chunk: Optional callback invoked with visible model text as
+                it arrives from ADK events.
 
         Returns:
             Reply text and any files tools queued for Telegram delivery.
@@ -339,6 +343,7 @@ class TelegramHandler:
                     message=message,
                     session_id=effective_session_id,
                     force_litellm_model=force_litellm_model,
+                    on_text_chunk=on_text_chunk,
                 )
             )
             conversation_state.active_turn = _ActiveTelegramTurn(
@@ -378,6 +383,7 @@ class TelegramHandler:
         message: str,
         session_id: str,
         force_litellm_model: str | None,
+        on_text_chunk: Callable[[str], Awaitable[None]] | None,
     ) -> TelegramAgentReply:
         """Run one Telegram turn.
 
@@ -430,6 +436,8 @@ class TelegramHandler:
         session_ready = time.perf_counter()
         content = types.Content(role="user", parts=[types.Part(text=message)])
         response_parts: list[str] = []
+        streamed_text = False
+        streamed_text_length = 0
 
         if latency_log:
             session_ms = (session_ready - pipeline_start) * 1000
@@ -472,6 +480,13 @@ class TelegramHandler:
                                 continue
                             if part.text:
                                 response_parts.append(part.text)
+                        if on_text_chunk is not None:
+                            full_response_text = "".join(response_parts)
+                            unsent_text = full_response_text[streamed_text_length:]
+                            if unsent_text.strip():
+                                await on_text_chunk(unsent_text)
+                                streamed_text = True
+                                streamed_text_length = len(full_response_text)
         except asyncio.CancelledError as exc:
             pending_on_cancel = end_telegram_file_batch()
             discard_telegram_staging_files(pending_on_cancel)
@@ -492,6 +507,7 @@ class TelegramHandler:
         return TelegramAgentReply(
             text="".join(response_parts),
             documents=tuple(pending_files),
+            streamed_text=streamed_text,
         )
 
     async def reset_session(self, user_id: str, session_id: str | None = None) -> bool:
@@ -670,6 +686,7 @@ async def process_message(
     message: str,
     session_id: str | None = None,
     force_litellm_model: str | None = None,
+    on_text_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> TelegramAgentReply:
     """Process a message through the ADK agent.
 
@@ -682,6 +699,8 @@ async def process_message(
         session_id: Optional session ID for conversation continuity.
             If not provided, user_id is used as session_id.
         force_litellm_model: Optional LiteLLM model id override (see TelegramHandler).
+        on_text_chunk: Optional callback invoked with visible model text as it
+            streams from the ADK runner.
 
     Returns:
         The agent's response text and optional Telegram document queue.
@@ -696,6 +715,7 @@ async def process_message(
         message=message,
         session_id=session_id,
         force_litellm_model=force_litellm_model,
+        on_text_chunk=on_text_chunk,
     )
 
 
