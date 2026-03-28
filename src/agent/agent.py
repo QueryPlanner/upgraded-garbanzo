@@ -16,6 +16,7 @@ from google.adk.plugins.global_instruction_plugin import (  # noqa: E402
     GlobalInstructionPlugin,
 )
 from google.adk.plugins.logging_plugin import LoggingPlugin  # noqa: E402
+from google.adk.tools import LongRunningFunctionTool  # noqa: E402
 
 from .callbacks import (  # noqa: E402
     LoggingCallbacks,
@@ -54,6 +55,7 @@ from .tools import (  # noqa: E402
     list_workouts,
     log_workout,
     read_context_file,
+    run_claude_coding_task,
     schedule_reminder,
     send_telegram_file,
     write_context_file,
@@ -112,6 +114,7 @@ root_agent = LlmAgent(
         get_youtube_transcript,
         # Docker-only shell (see docker_bash_execute docstring)
         docker_bash_execute,
+        LongRunningFunctionTool(run_claude_coding_task),
         # Telegram: queue file for send after reply (see send_telegram_file)
         send_telegram_file,
         # Skills (lazy-loaded toolsets)

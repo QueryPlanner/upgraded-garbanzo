@@ -91,7 +91,7 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]  # Allow assert statements in tests
+"tests/**/*.py" = ["S101", "S105"]  # Allow assert statements and hardcoded test values
 # Dynamic WHERE clauses built entirely from hardcoded column names; user values
 # are always passed as bind parameters (?), so S608 is a false positive here.
 "src/agent/fitness/storage.py" = ["S608"]

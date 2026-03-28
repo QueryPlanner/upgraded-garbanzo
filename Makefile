@@ -54,20 +54,20 @@ dev: dev-bot
 
 dev-bot:
 	@echo "🚀 Starting development bot..."
-	docker compose -f docker-compose.dev.yml --profile bot up -d
+	docker compose -f docker-compose.dev.yml --profile bot up --build -d
 	@echo "✅ Development bot running"
 	@echo "📊 View logs: make dev-logs"
 
 dev-all:
 	@echo "🚀 Starting development bot and API..."
-	docker compose -f docker-compose.dev.yml --profile all up -d
+	docker compose -f docker-compose.dev.yml --profile all up --build -d
 	@echo "✅ Development environment running (bot + API)"
 	@echo "📊 View logs: make dev-logs"
 	@echo "🔍 API Health: curl http://localhost:3001/health"
 
 dev-stop:
 	@echo "🛑 Stopping development environment..."
-	docker compose -f docker-compose.dev.yml down
+	docker compose -f docker-compose.dev.yml --profile all down --remove-orphans
 	@echo "✅ Development environment stopped"
 
 dev-logs:
@@ -75,7 +75,7 @@ dev-logs:
 
 dev-build:
 	@echo "🔨 Building development image..."
-	docker compose -f docker-compose.dev.yml build --no-cache
+	docker compose -f docker-compose.dev.yml build
 	@echo "✅ Development image built"
 
 dev-shell:
@@ -89,20 +89,20 @@ prod: prod-bot
 
 prod-bot:
 	@echo "🚀 Starting production bot..."
-	docker compose -f docker-compose.prod.yml --profile bot up -d
+	docker compose -f docker-compose.prod.yml --profile bot up --build -d
 	@echo "✅ Production bot running"
 	@echo "📊 View logs: make prod-logs"
 
 prod-all:
 	@echo "🚀 Starting production bot and API..."
-	docker compose -f docker-compose.prod.yml --profile all up -d
+	docker compose -f docker-compose.prod.yml --profile all up --build -d
 	@echo "✅ Production environment running (bot + API)"
 	@echo "📊 View logs: make prod-logs"
 	@echo "🔍 API Health: curl http://localhost:3000/health"
 
 prod-stop:
 	@echo "🛑 Stopping production environment..."
-	docker compose -f docker-compose.prod.yml down
+	docker compose -f docker-compose.prod.yml --profile all down --remove-orphans
 	@echo "✅ Production environment stopped"
 
 prod-logs:
@@ -110,7 +110,7 @@ prod-logs:
 
 prod-build:
 	@echo "🔨 Building production image..."
-	docker compose -f docker-compose.prod.yml build --no-cache
+	docker compose -f docker-compose.prod.yml build
 	@echo "✅ Production image built"
 
 prod-shell:
@@ -146,7 +146,7 @@ dev-clean:
 		echo "Press Ctrl+C to cancel, or Enter to continue..."; \
 		read -r; \
 	fi
-	docker compose -f docker-compose.dev.yml down -v --remove-orphans
+	docker compose -f docker-compose.dev.yml --profile all down -v --remove-orphans
 	@echo "✅ Development environment and volumes removed"
 
 prod-clean:
@@ -155,7 +155,7 @@ prod-clean:
 		echo "Press Ctrl+C to cancel, or Enter to continue..."; \
 		read -r; \
 	fi
-	docker compose -f docker-compose.prod.yml down -v --remove-orphans
+	docker compose -f docker-compose.prod.yml --profile all down -v --remove-orphans
 	@echo "✅ Production environment and volumes removed"
 
 clean: dev-clean prod-clean

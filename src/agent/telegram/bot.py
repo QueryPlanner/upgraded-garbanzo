@@ -399,10 +399,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     asyncio.create_task(_send_typing_indicator())
 
     try:
+
+        async def _send_live_text_chunk(chunk_text: str) -> None:
+            """Forward visible model text to Telegram as it arrives."""
+            if not chunk_text.strip():
+                return
+            assert update.message is not None  # noqa: S101
+            await _send_agent_text(update.message, chunk_text)
+
         # Process message through ADK agent
         reply = await process_message(
             user_id=user_id,
             message=user_message,
+            on_text_chunk=_send_live_text_chunk,
         )
 
         if reply.superseded:
@@ -411,26 +420,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         response_text = reply.text
         has_text = bool(response_text and response_text.strip())
-        if not has_text and not reply.documents:
+        if not has_text and not reply.streamed_text and not reply.documents:
             logger.warning(f"Agent returned empty response for user {user_id}")
             await update.message.reply_text(
                 "🤔 I'm not sure how to respond to that. Could you rephrase?"
             )
             return
 
-        if has_text:
-            telegram_response = _render_markdown_as_html(response_text)
-
-            # Split long messages if needed (Telegram has 4096 char limit)
-            if len(telegram_response) <= MAX_MESSAGE_LENGTH:
-                await _send_validated_chunk(
-                    message=update.message,
-                    chunk=telegram_response,
-                    fallback_text=response_text,
-                )
-            else:
-                # Split into chunks at natural boundaries when possible
-                await _send_long_message(update.message, telegram_response)
+        if has_text and not reply.streamed_text:
+            await _send_agent_text(update.message, response_text)
 
         await _send_queued_telegram_documents(
             bot=context.bot,
@@ -451,6 +449,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "❌ Sorry, an error occurred while processing your message. "
             "Please try again later."
         )
+
+
+async def _send_agent_text(message: Message, response_text: str) -> None:
+    """Render markdown-like agent text and send it to Telegram."""
+    telegram_response = _render_markdown_as_html(response_text)
+
+    if len(telegram_response) <= MAX_MESSAGE_LENGTH:
+        await _send_validated_chunk(
+            message=message,
+            chunk=telegram_response,
+            fallback_text=response_text,
+        )
+        return
+
+    await _send_long_message(message, telegram_response)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

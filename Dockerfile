@@ -11,6 +11,9 @@ RUN pip install uv==0.9.26
 # Set working directory
 WORKDIR /app
 
+
+
+
 # Environment variables for optimal uv behavior
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
@@ -84,41 +87,6 @@ RUN pip install --no-cache-dir uv==0.9.26
 RUN groupadd -g 1000 app && \
     useradd -u 1000 -g app -s /bin/sh -m app
 
-# Set working directory
-WORKDIR /app
-
-# Pre-create directories for volume mounts and set ownership
-RUN mkdir -p /app/src/.adk/artifacts \
-             /app/src/agent/data \
-             /app/src/.context \
-             /app/memory \
-             /home/app/garbanzo-home \
-    && chown -R app:app /app /home/app/garbanzo-home
-
-# Copy application and virtual environment from builder
-COPY --from=builder --chown=app:app /app .
-
-# Playwright: Install OS deps only (browser is system chromium via apt)
-# Skip browser download since we use system chromium at /usr/bin/chromium
-RUN /app/.venv/bin/playwright install-deps chromium
-
-# Copy entrypoint script and set ownership/permissions
-COPY --chown=app:app entrypoint.sh .
-RUN chmod +x entrypoint.sh
-
-# Utility scripts for Garbanzo bootstrap and delegated coding workflows
-COPY --chown=app:app scripts /app/scripts
-RUN find /app/scripts -type f -name '*.sh' -exec chmod +x {} \;
-
-# Copy context files (IDENTITY.md, SOUL.md - USER.md is user-specific)
-COPY --chown=app:app .context/*.md /app/src/.context/
-
-# Skill markdown (lazy-loaded via SkillToolset); non-editable installs need this path
-COPY --chown=app:app skills /app/skills
-
-# Default MEMORY.md template (entrypoint copies into /app/memory when volume is empty)
-COPY --chown=app:app memory/MEMORY.md /app/.memory-seed/MEMORY.md
-
 # Set environment to use virtual environment
 ENV VIRTUAL_ENV=/app/.venv \
     GARBANZO_HOME=/home/app/garbanzo-home \
@@ -139,14 +107,57 @@ ENV VIRTUAL_ENV=/app/.venv \
     PORT=8080 \
     AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Switch to non-root user
+# Switch to app user temporarily to install Claude
 USER app
-
 # Install Claude Code for in-container developer workflows and MCP support.
 RUN --mount=type=cache,target=/home/app/.cache \
     mkdir -p "$HOME/.claude" "$HOME/.local/bin" "$HOME/.local/share" \
     && curl -fsSL https://claude.ai/install.sh | bash \
     && claude --version
+# Switch back to root to finish setup
+USER root
+
+# Set working directory
+WORKDIR /app
+
+# Playwright: Install OS deps only (browser is system chromium via apt)
+# We do this before copying code so it caches perfectly.
+RUN npx -y playwright@1.58.0 install-deps chromium
+
+
+# Pre-create directories for volume mounts and set ownership
+RUN mkdir -p /app/src/.adk/artifacts \
+             /app/src/agent/data \
+             /app/src/.context \
+             /app/memory \
+             /home/app/garbanzo-home \
+    && chown -R app:app /app /home/app/garbanzo-home
+
+# Copy application and virtual environment from builder
+COPY --from=builder --chown=app:app /app .
+
+
+# Copy entrypoint script and set ownership/permissions
+COPY --chown=app:app entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+# Utility scripts for Garbanzo bootstrap and delegated coding workflows
+COPY --chown=app:app scripts /app/scripts
+RUN find /app/scripts -type f -name '*.sh' -exec chmod +x {} \;
+
+# Copy context files (IDENTITY.md, SOUL.md - USER.md is user-specific)
+COPY --chown=app:app .context/*.md /app/src/.context/
+
+# Skill markdown (lazy-loaded via SkillToolset); non-editable installs need this path
+COPY --chown=app:app skills /app/skills
+
+# Default MEMORY.md template (entrypoint copies into /app/memory when volume is empty)
+COPY --chown=app:app memory/MEMORY.md /app/.memory-seed/MEMORY.md
+
+
+# Switch to non-root user
+USER app
+
 
 # Expose port (default 8080)
 EXPOSE 8080

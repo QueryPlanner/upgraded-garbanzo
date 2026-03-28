@@ -5,6 +5,7 @@ when agent tools are invoked. It integrates with the ADK callback system
 to provide observability into agent actions.
 """
 
+import html
 import logging
 from typing import TYPE_CHECKING
 
@@ -76,6 +77,25 @@ class ToolNotificationService:
         self._enabled = enabled
         logger.info(f"Tool notifications {'enabled' if enabled else 'disabled'}")
 
+    def _format_tool_notification(
+        self,
+        tool_name: str,
+        args: dict | None,
+    ) -> str:
+        """Build a Telegram-safe HTML notification message."""
+        safe_tool_name = html.escape(tool_name)
+        message = f"🔧 <b>Tool Called:</b> <code>{safe_tool_name}</code>"
+
+        if not args:
+            return message
+
+        args_text = str(args)
+        if len(args_text) > self.MAX_ARGS_LENGTH:
+            args_text = args_text[: self.MAX_ARGS_LENGTH - 3] + "..."
+
+        safe_args_text = html.escape(args_text)
+        return f"{message}\n📋 <b>Args:</b> <code>{safe_args_text}</code>"
+
     async def notify_tool_call(
         self,
         chat_id: str | int,
@@ -98,20 +118,12 @@ class ToolNotificationService:
             return
 
         try:
-            # Format the notification message
-            message = f"🔧 *Tool Called:* `{tool_name}`"
-
-            if args:
-                # Truncate args if too long
-                args_str = str(args)
-                if len(args_str) > self.MAX_ARGS_LENGTH:
-                    args_str = args_str[: self.MAX_ARGS_LENGTH - 3] + "..."
-                message += f"\n📋 *Args:* `{args_str}`"
+            message = self._format_tool_notification(tool_name=tool_name, args=args)
 
             await self.bot.send_message(
                 chat_id=chat_id,
                 text=message,
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=ParseMode.HTML,
             )
             logger.debug(f"Sent tool notification for {tool_name} to {chat_id}")
 

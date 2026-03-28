@@ -98,7 +98,7 @@ class TestToolNotificationService:
         assert call_args.kwargs["chat_id"] == "123"
         assert "test_tool" in call_args.kwargs["text"]
         assert "key" in call_args.kwargs["text"]
-        assert call_args.kwargs["parse_mode"] == "Markdown"
+        assert call_args.kwargs["parse_mode"] == "HTML"
 
     @pytest.mark.asyncio
     async def test_notify_tool_call_no_args(self) -> None:
@@ -138,6 +138,30 @@ class TestToolNotificationService:
         # Should contain truncated args (ending with ...)
         text = call_args.kwargs["text"]
         assert "..." in text
+
+    @pytest.mark.asyncio
+    async def test_notify_tool_call_escapes_html_sensitive_args(self) -> None:
+        """Test that tool args are escaped before sending as Telegram HTML."""
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock()
+        service = ToolNotificationService(bot=mock_bot, enabled=True)
+
+        claude_like_args = {
+            "prompt": "Fix <broken> markdown with `code` & underscores_like_this",
+        }
+
+        await service.notify_tool_call(
+            chat_id="123",
+            tool_name="run_claude_coding_task",
+            args=claude_like_args,
+        )
+
+        mock_bot.send_message.assert_called_once()
+        call_args = mock_bot.send_message.call_args
+        text = call_args.kwargs["text"]
+        assert "&lt;broken&gt;" in text
+        assert "&amp;" in text
+        assert "underscores_like_this" in text
 
     @pytest.mark.asyncio
     async def test_notify_tool_call_handles_exception(self) -> None:
