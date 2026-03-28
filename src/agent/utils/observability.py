@@ -19,16 +19,16 @@ from opentelemetry.sdk.resources import (
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace.span import NonRecordingSpan
 
 
-def _tracer_provider_is_noop() -> bool:
-    """True if the process still uses the default non-exporting tracer provider."""
-    probe_span = trace_api.get_tracer(__name__).start_span("otel_provider_probe")
-    try:
-        return isinstance(probe_span, NonRecordingSpan)
-    finally:
-        probe_span.end()
+def _sdk_tracer_provider_is_installed() -> bool:
+    """True once a real SDK TracerProvider is registered (vs default proxy / noop).
+
+    Never use a probe span for this: after OTLP is enabled, ``start_span`` would
+    create a real exported span named e.g. ``otel_provider_probe`` on every
+    subsequent ``configure_otel_resource`` call, polluting Langfuse.
+    """
+    return isinstance(trace_api.get_tracer_provider(), TracerProvider)
 
 
 def _install_otlp_tracer_provider_from_env() -> None:
@@ -41,7 +41,7 @@ def _install_otlp_tracer_provider_from_env() -> None:
     """
     if not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip():
         return
-    if not _tracer_provider_is_noop():
+    if _sdk_tracer_provider_is_installed():
         return
 
     protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf").strip().lower()

@@ -186,7 +186,9 @@ def _queue_telegram_send_file_copy(
 def send_telegram_file(
     tool_context: ToolContext,
     text_file_name: str,
-    text_file_body: Any = None,
+    # ADK uses isinstance(default, annotation); ``typing.Any`` raises TypeError.
+    # Use plain ``dict``/``list`` (not parameterized) so runtime isinstance() is valid.
+    text_file_body: str | dict | list | None = None,
     agent_data_path: str | None = None,
     caption: str | None = None,
     parse_mode: str | None = None,

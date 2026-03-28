@@ -957,7 +957,7 @@ class TestSendTelegramFile:
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
-            text_file_body=42,
+            text_file_body=42,  # type: ignore[arg-type]
             text_file_name="x.txt",
         )
         assert result["status"] == "error"
