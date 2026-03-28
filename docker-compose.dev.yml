@@ -35,9 +35,16 @@ x-volumes: &volumes
   - agent_memory:/app/memory
   - garbanzo_home:/home/app/garbanzo-home
 
+# Linux: containers do not get host.docker.internal unless mapped. Use with
+# OPENAI_API_BASE=http://host.docker.internal:PORT when a host-side proxy
+# (socat/Caddy) forwards to an mDNS host the container cannot resolve.
+x-host-docker-internal: &host-docker-internal
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
 services:
   telegram-bot:
-    <<: *build-info
+    <<: [*build-info, *host-docker-internal]
     container_name: garbanzo-dev-bot
     env_file:
       - .env.dev
@@ -56,7 +63,7 @@ services:
       - all
 
   api:
-    <<: *build-info
+    <<: [*build-info, *host-docker-internal]
     container_name: garbanzo-dev-api
     env_file:
       - .env.dev

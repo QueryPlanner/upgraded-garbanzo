@@ -145,6 +145,10 @@ RUN chmod +x entrypoint.sh
 COPY --chown=app:app scripts /app/scripts
 RUN find /app/scripts -type f -name '*.sh' -exec chmod +x {} \;
 
+# Global Claude Code instructions (~/.claude/CLAUDE.md with HOME=garbanzo-home)
+COPY --chown=app:app docker/garbanzo-home/.claude/CLAUDE.md \
+    /home/app/garbanzo-home/.claude/CLAUDE.md
+
 # Copy context files (IDENTITY.md, SOUL.md - USER.md is user-specific)
 COPY --chown=app:app .context/*.md /app/src/.context/
 

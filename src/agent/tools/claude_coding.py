@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from google.adk.tools import ToolContext
+from telegram import InputFile
 
 from ..telegram.notifications import get_notification_service
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _DOCKER_BASH_MAX_COMBINED_OUTPUT_BYTES = 256_000
 _TELEGRAM_PLAIN_TEXT_MAX_MESSAGE_CHARS = 4000
+_TELEGRAM_DOCUMENT_CAPTION_MAX = 1024
 
 _ACTIVE_BACKGROUND_CLAUDE_JOBS: dict[str, asyncio.Task[None]] = {}
 
@@ -190,6 +192,89 @@ async def _send_background_claude_job_result(
     for section in output_sections:
         for chunk in _split_plain_text_for_telegram(section):
             await notification_service.bot.send_message(chat_id=chat_id, text=chunk)
+
+    await _deliver_claude_completion_to_agent_session(
+        chat_id=chat_id,
+        job_id=job_id,
+        cwd=cwd,
+        result=result,
+    )
+
+
+async def _deliver_claude_completion_to_agent_session(
+    *,
+    chat_id: str,
+    job_id: str,
+    cwd: str,
+    result: dict[str, Any],
+) -> None:
+    """Append the job result to the user's ADK session and post the agent's reply."""
+    from ..telegram.bot import send_agent_markdown_to_chat_id
+    from ..telegram.handler import get_handler, process_claude_job_completion
+
+    if get_handler() is None:
+        logger.warning(
+            "Claude job %s finished but Telegram handler is not initialized; "
+            "skipping agent follow-up turn",
+            job_id,
+        )
+        return
+
+    try:
+        reply = await process_claude_job_completion(
+            user_id=chat_id,
+            job_id=job_id,
+            cwd=cwd,
+            result=result,
+        )
+    except Exception:
+        logger.exception("Agent follow-up failed for Claude job %s", job_id)
+        return
+
+    if reply is None or reply.superseded:
+        return
+
+    has_text = bool(reply.text.strip())
+    has_docs = bool(reply.documents)
+    if not has_text and not has_docs:
+        return
+
+    notification_service = get_notification_service()
+    if notification_service._bot is None:
+        logger.warning(
+            "Claude job %s agent follow-up produced output but bot is unavailable",
+            job_id,
+        )
+        return
+
+    bot = notification_service.bot
+
+    if has_text:
+        await send_agent_markdown_to_chat_id(bot, chat_id, reply.text)
+
+    for doc in reply.documents:
+        try:
+            caption = doc.caption
+            if caption is not None and len(caption) > _TELEGRAM_DOCUMENT_CAPTION_MAX:
+                caption = caption[: _TELEGRAM_DOCUMENT_CAPTION_MAX - 1] + "…"
+            with doc.path.open("rb") as upload_fh:
+                document = InputFile(
+                    upload_fh,
+                    filename=doc.filename or doc.path.name,
+                )
+            await bot.send_document(
+                chat_id=chat_id,
+                document=document,
+                caption=caption,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send follow-up document for Claude job %s path=%s",
+                job_id,
+                doc.path,
+            )
+        finally:
+            doc.path.unlink(missing_ok=True)
 
 
 async def _run_background_claude_job(

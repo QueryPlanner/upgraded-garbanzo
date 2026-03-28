@@ -1492,3 +1492,66 @@ async def test_send_background_claude_job_result_posts_completion_messages() -> 
     stdout_call = mock_bot.send_message.call_args_list[1]
     assert "Claude job `job-1234` finished." in summary_call.kwargs["text"]
     assert "fixed the issue" in stdout_call.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_claude_job_completion_triggers_agent_followup() -> None:
+    """Finished jobs inject output into the ADK session and post the model reply."""
+    mock_bot = MagicMock()
+    mock_bot.send_message = AsyncMock()
+    mock_notification_service = MagicMock()
+    mock_notification_service.configure_mock(_bot=mock_bot)
+    type(mock_notification_service).bot = property(lambda self: mock_bot)
+
+    from agent.telegram.handler import TelegramAgentReply
+    from agent.tools.claude_coding import _send_background_claude_job_result
+
+    mock_followup = AsyncMock(
+        return_value=TelegramAgentReply(text="**Summary:** done.\nNext: verify CI.")
+    )
+    mock_send_md = AsyncMock()
+
+    with (
+        patch(
+            "agent.tools.claude_coding.get_notification_service",
+            return_value=mock_notification_service,
+        ),
+        patch(
+            "agent.telegram.handler.get_handler",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.telegram.handler.process_claude_job_completion",
+            mock_followup,
+        ),
+        patch(
+            "agent.telegram.bot.send_agent_markdown_to_chat_id",
+            mock_send_md,
+        ),
+    ):
+        await _send_background_claude_job_result(
+            chat_id="999",
+            job_id="job-abcd",
+            cwd="/app/workspace",
+            result={
+                "status": "success",
+                "exit_code": 0,
+                "stdout": "ok",
+                "stderr": "",
+                "truncated": False,
+            },
+        )
+
+    mock_followup.assert_awaited_once()
+    followup_await = mock_followup.await_args
+    assert followup_await is not None
+    call_kw = followup_await.kwargs
+    assert call_kw["user_id"] == "999"
+    assert call_kw["job_id"] == "job-abcd"
+    assert call_kw["cwd"] == "/app/workspace"
+    assert "ok" in call_kw["result"]["stdout"]
+    mock_send_md.assert_awaited_once()
+    md_await = mock_send_md.await_args
+    assert md_await is not None
+    assert md_await.args[1] == "999"
+    assert "Summary" in md_await.args[2]

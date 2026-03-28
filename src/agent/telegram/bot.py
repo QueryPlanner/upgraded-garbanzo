@@ -749,6 +749,121 @@ async def _split_and_send(message: Message, text: str) -> None:
         remaining = remaining[split_point:]
 
 
+async def _send_validated_html_to_chat(
+    bot: Bot,
+    chat_id: int | str,
+    chunk: str,
+    fallback_text: str | None = None,
+) -> None:
+    """Send one HTML chunk to a chat with plain-text fallback (no reply-to)."""
+    if fallback_text is not None:
+        plain_text = fallback_text
+    else:
+        plain_text = _render_html_as_plain_text(chunk)
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=chunk,
+            parse_mode=ParseMode.HTML,
+        )
+    except TelegramError:
+        logger.warning(
+            "Telegram rejected HTML chunk for chat_id=%s, sending plain",
+            chat_id,
+            exc_info=True,
+        )
+        await bot.send_message(chat_id=chat_id, text=plain_text)
+
+
+async def _send_long_agent_html_to_chat(
+    bot: Bot,
+    chat_id: int | str,
+    html_text: str,
+) -> None:
+    """Split long HTML across Telegram messages (paragraph boundaries first)."""
+    paragraphs = html_text.split("\n\n")
+    current_chunk = ""
+
+    for paragraph in paragraphs:
+        if (
+            current_chunk
+            and len(current_chunk) + 2 + len(paragraph) > MAX_MESSAGE_LENGTH
+        ):
+            await _send_validated_html_to_chat(
+                bot,
+                chat_id,
+                current_chunk.strip(),
+                fallback_text=None,
+            )
+            current_chunk = paragraph
+        elif current_chunk:
+            current_chunk += "\n\n" + paragraph
+        else:
+            current_chunk = paragraph
+
+    if current_chunk:
+        if len(current_chunk) <= MAX_MESSAGE_LENGTH:
+            await _send_validated_html_to_chat(
+                bot,
+                chat_id,
+                current_chunk.strip(),
+                fallback_text=None,
+            )
+        else:
+            remaining = current_chunk
+            while remaining:
+                if len(remaining) <= MAX_MESSAGE_LENGTH:
+                    await _send_validated_html_to_chat(
+                        bot,
+                        chat_id,
+                        remaining.strip(),
+                        fallback_text=None,
+                    )
+                    break
+
+                split_point = MAX_MESSAGE_LENGTH
+                newline_pos = remaining.rfind("\n", 0, MAX_MESSAGE_LENGTH)
+                if newline_pos > MAX_MESSAGE_LENGTH // 2:
+                    split_point = newline_pos + 1
+                else:
+                    space_pos = remaining.rfind(" ", 0, MAX_MESSAGE_LENGTH)
+                    if space_pos > MAX_MESSAGE_LENGTH // 2:
+                        split_point = space_pos + 1
+
+                piece = remaining[:split_point].strip()
+                if piece:
+                    await _send_validated_html_to_chat(
+                        bot,
+                        chat_id,
+                        piece,
+                        fallback_text=None,
+                    )
+                remaining = remaining[split_point:]
+
+
+async def send_agent_markdown_to_chat_id(
+    bot: Bot,
+    chat_id: int | str,
+    response_text: str,
+) -> None:
+    """Send agent markdown to a chat as Telegram HTML (e.g. Claude job follow-up)."""
+    if not response_text.strip():
+        return
+
+    telegram_response = _render_markdown_as_html(response_text)
+    if len(telegram_response) <= MAX_MESSAGE_LENGTH:
+        await _send_validated_html_to_chat(
+            bot,
+            chat_id,
+            telegram_response.strip(),
+            fallback_text=response_text,
+        )
+        return
+
+    await _send_long_agent_html_to_chat(bot, chat_id, telegram_response)
+
+
 def create_application(token: str) -> Application:
     """Create and configure the Telegram Application.
 
