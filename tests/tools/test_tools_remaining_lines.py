@@ -12,8 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from conftest import MockState, MockToolContext
 from google.adk.tools import ToolContext
+from telegram.error import TelegramError
 
 from agent.fitness import CalorieEntry, MealType
+from agent.telegram.handler import TelegramAgentReply
 from agent.tools import (
     add_calories,
     delete_context_file,
@@ -28,6 +30,7 @@ from agent.tools import (
     read_context_file,
     write_context_file,
 )
+from agent.utils.telegram_outbox import PendingTelegramFile
 
 
 @pytest.fixture
@@ -903,3 +906,297 @@ class TestSendTelegramFileMissingBranches:
             discard = end_telegram_file_batch()
             for p in discard:
                 p.path.unlink(missing_ok=True)
+
+
+class TestDeliverClaudeCompletionToAgentSession:
+    """Branch coverage for _deliver_claude_completion_to_agent_session."""
+
+    @pytest.mark.asyncio
+    async def test_logs_and_returns_when_handler_missing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        caplog.set_level(logging.WARNING, logger="agent.tools")
+
+        with patch("agent.telegram.handler.get_handler", return_value=None):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-h",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        assert any(
+            "Telegram handler is not initialized" in r.getMessage()
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_logs_when_process_claude_completion_raises(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        caplog.set_level(logging.ERROR, logger="agent.tools")
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(side_effect=RuntimeError("agent down")),
+            ),
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-e",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        assert any(
+            "Agent follow-up failed for Claude job" in r.getMessage()
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_when_reply_is_none(self) -> None:
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock()
+        mock_ns = MagicMock()
+        mock_ns._bot = mock_bot
+        mock_ns.bot = mock_bot
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "agent.tools.claude_coding.get_notification_service",
+                return_value=mock_ns,
+            ),
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-n",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        mock_bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_when_reply_superseded(self) -> None:
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        mock_bot = MagicMock()
+        mock_ns = MagicMock()
+        mock_ns._bot = mock_bot
+        mock_ns.bot = mock_bot
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(
+                    return_value=TelegramAgentReply(
+                        text="x",
+                        superseded=True,
+                    ),
+                ),
+            ),
+            patch(
+                "agent.tools.claude_coding.get_notification_service",
+                return_value=mock_ns,
+            ),
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-s",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        mock_bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_when_no_text_and_no_documents(self) -> None:
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        mock_bot = MagicMock()
+        mock_ns = MagicMock()
+        mock_ns._bot = mock_bot
+        mock_ns.bot = mock_bot
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(return_value=TelegramAgentReply(text="")),
+            ),
+            patch(
+                "agent.tools.claude_coding.get_notification_service",
+                return_value=mock_ns,
+            ),
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-z",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        mock_bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_warns_when_bot_unavailable_despite_reply(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        caplog.set_level(logging.WARNING, logger="agent.tools")
+
+        mock_ns = MagicMock()
+        mock_ns._bot = None
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(return_value=TelegramAgentReply(text="hello")),
+            ),
+            patch(
+                "agent.tools.claude_coding.get_notification_service",
+                return_value=mock_ns,
+            ),
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-b",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        assert any(
+            "agent follow-up produced output but bot is unavailable" in r.getMessage()
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_sends_document_only_reply(self, tmp_path: Path) -> None:
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        doc_path = tmp_path / "out.txt"
+        doc_path.write_text("payload", encoding="utf-8")
+        doc = PendingTelegramFile(path=doc_path, caption="cap", filename="out.txt")
+
+        mock_bot = MagicMock()
+        mock_bot.send_document = AsyncMock()
+        mock_ns = MagicMock()
+        mock_ns._bot = mock_bot
+        mock_ns.bot = mock_bot
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(
+                    return_value=TelegramAgentReply(text="   ", documents=(doc,)),
+                ),
+            ),
+            patch(
+                "agent.tools.claude_coding.get_notification_service",
+                return_value=mock_ns,
+            ),
+            patch(
+                "agent.telegram.bot.send_agent_markdown_to_chat_id",
+                AsyncMock(),
+            ) as mock_md,
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="99",
+                job_id="job-d",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        mock_md.assert_not_called()
+        mock_bot.send_document.assert_awaited_once()
+        assert not doc_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_document_send_failure_still_unlinks(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from agent.tools.claude_coding import (
+            _deliver_claude_completion_to_agent_session,
+        )
+
+        caplog.set_level(logging.ERROR, logger="agent.tools")
+
+        doc_path = tmp_path / "bad.txt"
+        doc_path.write_text("x", encoding="utf-8")
+        long_cap = "c" * 1100
+        doc = PendingTelegramFile(path=doc_path, caption=long_cap, filename="bad.txt")
+
+        mock_bot = MagicMock()
+        mock_bot.send_document = AsyncMock(side_effect=TelegramError("fail"))
+        mock_ns = MagicMock()
+        mock_ns._bot = mock_bot
+        mock_ns.bot = mock_bot
+
+        with (
+            patch("agent.telegram.handler.get_handler", return_value=MagicMock()),
+            patch(
+                "agent.telegram.handler.process_claude_job_completion",
+                AsyncMock(
+                    return_value=TelegramAgentReply(text="", documents=(doc,)),
+                ),
+            ),
+            patch(
+                "agent.tools.claude_coding.get_notification_service",
+                return_value=mock_ns,
+            ),
+            patch(
+                "agent.telegram.bot.send_agent_markdown_to_chat_id",
+                AsyncMock(),
+            ),
+        ):
+            await _deliver_claude_completion_to_agent_session(
+                chat_id="1",
+                job_id="job-f",
+                cwd="/w",
+                result={"status": "ok"},
+            )
+
+        assert not doc_path.exists()
+        assert any(
+            "Failed to send follow-up document" in r.getMessage()
+            for r in caplog.records
+        )
