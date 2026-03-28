@@ -2,6 +2,9 @@
 
 import logging
 import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -58,6 +61,33 @@ class TestConfigureOtelResource:
         assert "OTEL_EXPORTER_OTLP_HEADERS" in os.environ
         assert "OTEL_EXPORTER_OTLP_PROTOCOL" in os.environ
         assert os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] == "http/protobuf"
+
+    def test_installs_sdk_tracer_provider_when_langfuse_configured(self) -> None:
+        """OTLP env alone is insufficient; SDK TracerProvider must be registered.
+
+        OpenTelemetry allows only one ``set_tracer_provider`` per interpreter, so
+        this is asserted in a fresh subprocess to avoid coupling to other tests.
+        """
+        script = """
+import os
+os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+os.environ.pop("OTEL_EXPORTER_OTLP_HEADERS", None)
+os.environ.pop("OTEL_EXPORTER_OTLP_PROTOCOL", None)
+os.environ["LANGFUSE_PUBLIC_KEY"] = "pk-test"
+os.environ["LANGFUSE_SECRET_KEY"] = "sk-test"
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from agent.utils.observability import configure_otel_resource
+configure_otel_resource("probe-agent")
+assert isinstance(trace.get_tracer_provider(), TracerProvider)
+"""
+        repo_root = Path(__file__).resolve().parents[2]
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-c", script],
+            check=True,
+            cwd=repo_root,
+            env={**os.environ, "PYTHONPATH": str(repo_root / "src")},
+        )
 
     def test_uses_custom_langfuse_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that custom Langfuse URL is used."""

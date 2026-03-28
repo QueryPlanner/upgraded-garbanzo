@@ -751,3 +751,155 @@ class TestTrackBackgroundClaudeJob:
         await asyncio.sleep(0.01)
 
         assert job_id not in _ACTIVE_BACKGROUND_CLAUDE_JOBS
+
+
+class TestAgentRunsInsideDocker:
+    """Tests for _agent_runs_inside_docker function."""
+
+    def test_returns_true_when_dockerenv_exists(self) -> None:
+        """Should return True when /.dockerenv file exists."""
+        from agent.tools.claude_coding import _agent_runs_inside_docker
+
+        with patch.object(Path, "exists", return_value=True):
+            result = _agent_runs_inside_docker()
+
+        assert result is True
+
+    def test_returns_false_when_dockerenv_missing(self) -> None:
+        """Should return False when /.dockerenv file does not exist."""
+        from agent.tools.claude_coding import _agent_runs_inside_docker
+
+        with patch.object(Path, "exists", return_value=False):
+            result = _agent_runs_inside_docker()
+
+        assert result is False
+
+
+class TestTruncateOutput:
+    """Tests for _truncate_output function."""
+
+    def test_truncates_output_when_exceeds_max_bytes(self) -> None:
+        """Should truncate and add message when output exceeds max."""
+        from agent.tools.claude_coding import _truncate_output
+
+        data = b"x" * 1000
+        text, truncated = _truncate_output(data, 100)
+
+        assert truncated is True
+        assert len(text) < len(data)
+        assert "truncated" in text
+
+    def test_no_truncation_when_within_limit(self) -> None:
+        """Should not truncate when output is within limit."""
+        from agent.tools.claude_coding import _truncate_output
+
+        data = b"hello world"
+        text, truncated = _truncate_output(data, 1000)
+
+        assert truncated is False
+        assert text == "hello world"
+
+
+class TestExistingFileIfTextBodyIsPathString:
+    """Tests for _existing_file_if_text_body_is_path_string edge cases."""
+
+    def test_returns_none_for_empty_string(self) -> None:
+        """Empty string should return None."""
+        from agent.tools.telegram_files import (
+            _existing_file_if_text_body_is_path_string,
+        )
+
+        result = _existing_file_if_text_body_is_path_string("")
+        assert result is None
+
+    def test_returns_none_for_whitespace_only(self) -> None:
+        """Whitespace-only string should return None."""
+        from agent.tools.telegram_files import (
+            _existing_file_if_text_body_is_path_string,
+        )
+
+        result = _existing_file_if_text_body_is_path_string("   ")
+        assert result is None
+
+    def test_returns_none_on_path_exception(self, tmp_path: Path) -> None:
+        """Exception during path operations should return None."""
+        from agent.tools.telegram_files import (
+            _existing_file_if_text_body_is_path_string,
+        )
+
+        # Create a real file to test with
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test", encoding="utf-8")
+        abs_path = str(test_file.resolve())
+
+        # Mock is_file to raise an exception after the path passes is_absolute
+        with patch.object(Path, "is_file", side_effect=OSError("permission")):
+            result = _existing_file_if_text_body_is_path_string(abs_path)
+            assert result is None
+
+
+class TestSendTelegramFileMissingBranches:
+    """Tests for missing branches in send_telegram_file."""
+
+    def test_text_body_path_file_too_large(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """File found via text_file_body path should be rejected if too large."""
+        from agent.tools.telegram_files import send_telegram_file
+        from agent.utils.telegram_outbox import (
+            begin_telegram_file_batch,
+            end_telegram_file_batch,
+        )
+
+        # Create a large file
+        large_file = tmp_path / "large.bin"
+        large_file.write_bytes(b"x" * (101 * 1024 * 1024))  # 101 MB
+
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        try:
+            tool_context = MagicMock()
+            tool_context.user_id = "u1"
+            tool_context.state = {"user_id": "u1"}
+
+            result = send_telegram_file(
+                tool_context,
+                text_file_body=str(large_file.resolve()),
+                text_file_name="large.bin",
+            )
+
+            assert result["status"] == "error"
+            assert "too large" in result["message"].lower()
+        finally:
+            discard = end_telegram_file_batch()
+            for p in discard:
+                p.path.unlink(missing_ok=True)
+
+    def test_neither_path_nor_body_returns_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Return error when neither agent_data_path nor text_file_body provided."""
+        from agent.tools.telegram_files import send_telegram_file
+        from agent.utils.telegram_outbox import (
+            begin_telegram_file_batch,
+            end_telegram_file_batch,
+        )
+
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
+        begin_telegram_file_batch()
+        try:
+            tool_context = MagicMock()
+            tool_context.user_id = "u1"
+            tool_context.state = {"user_id": "u1"}
+
+            result = send_telegram_file(
+                tool_context,
+                text_file_name="empty.txt",
+            )
+
+            assert result["status"] == "error"
+            assert "provide either" in result["message"].lower()
+        finally:
+            discard = end_telegram_file_batch()
+            for p in discard:
+                p.path.unlink(missing_ok=True)
