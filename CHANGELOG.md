@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-28
+
+### Added
+- **Claude Code Automation Skill:** Add skill for working on GitHub issues and creating PRs with Claude Code, including workspace cleanup workflow.
+- **Claude Background Jobs:** Run Claude Code tasks in background for Telegram; post completion with session injection and agent follow-up.
+- **Telegram Streaming:** Stream visible ADK text to Telegram during a turn with tool-call notifications.
+- **LongRunningFunctionTool:** Add dedicated tool for Claude Code tasks with proper async handling.
+- **OTLP Tracer Provider:** Install SDK TracerProvider with OTLP export when environment requests it.
+
+### Changed
+- **Tools Reorganization:** Refactored tools into domain modules (reminders, fitness, brave_search, youtube, context_files, docker, telegram_files, claude_coding, misc) with backward-compatible re-exports.
+- **Telegram Plugin Location:** Move telegram_litellm_request_plugin.py to telegram/litellm_plugin.py and telegram_prefs.py to telegram/prefs.py.
+- **Test Structure:** Reorganize tests to mirror source structure.
+
+### Fixed
+- **OTLP Detection:** Avoid probe span pollution in Langfuse by checking TracerProvider type.
+- **ADK Type Annotation:** Fix text_file_body type annotation for ADK isinstance compatibility.
+- **Docker Dev Loop:** Optimize dev loop, fix make commands and docker build caching.
+- **Linux Docker:** Add host.docker.internal mapping for Linux in docker-compose.dev.
+
 ## [0.0.1] - 2026-03-25
 
 ### Added
@@ -39,5 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Avoid LaTeX in Telegram replies.
 - Persist SQLite data in Docker deployments.
 
-[Unreleased]: https://github.com/QueryPlanner/upgraded-garbanzo/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/QueryPlanner/upgraded-garbanzo/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/QueryPlanner/upgraded-garbanzo/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/QueryPlanner/upgraded-garbanzo/releases/tag/v0.0.1
