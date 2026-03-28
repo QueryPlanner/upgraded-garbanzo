@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 
 from conftest import MockState, MockToolContext
 
-from agent.tools import _extract_video_id, get_youtube_transcript
+from agent.tools import get_youtube_transcript
+from agent.tools.youtube import _extract_video_id
 
 
 class TestExtractVideoId:

@@ -55,7 +55,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.add_calorie_entry = AsyncMock(side_effect=RuntimeError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await add_calories(mock_tool_context, "f", 100)
         assert r["status"] == "error"
 
@@ -90,7 +90,7 @@ class TestFitnessToolErrors:
         )
         ms = MagicMock()
         ms.get_calorie_entries = AsyncMock(return_value=[e1, e2])
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await list_calories(mock_tool_context, meal_type="lunch")
         assert r["count"] == 1
 
@@ -100,7 +100,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.get_calorie_entries = AsyncMock(side_effect=OSError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await list_calories(mock_tool_context)
         assert r["status"] == "error"
 
@@ -117,7 +117,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.get_calorie_stats = AsyncMock(side_effect=RuntimeError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await get_calorie_stats(mock_tool_context)
         assert r["status"] == "error"
 
@@ -134,7 +134,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.add_workout_entry = AsyncMock(return_value=1)
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await log_workout(
                 mock_tool_context,
                 "Run",
@@ -152,7 +152,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.add_workout_entry = AsyncMock(side_effect=RuntimeError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await log_workout(mock_tool_context, "x")
         assert r["status"] == "error"
 
@@ -169,7 +169,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.get_workout_entries = AsyncMock(return_value=[])
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await list_workouts(mock_tool_context)
         assert r["entries"] == []
 
@@ -179,7 +179,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.get_workout_entries = AsyncMock(side_effect=RuntimeError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await list_workouts(mock_tool_context)
         assert r["status"] == "error"
 
@@ -196,7 +196,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.get_workout_stats = AsyncMock(side_effect=RuntimeError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await get_workout_stats(mock_tool_context)
         assert r["status"] == "error"
 
@@ -213,7 +213,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.delete_entry = AsyncMock(return_value=False)
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await delete_fitness_entry(mock_tool_context, "calorie", 9)
         assert r["status"] == "error"
 
@@ -223,7 +223,7 @@ class TestFitnessToolErrors:
     ) -> None:
         ms = MagicMock()
         ms.delete_entry = AsyncMock(side_effect=RuntimeError("x"))
-        with patch("agent.tools.get_fitness_storage", return_value=ms):
+        with patch("agent.fitness.tools.get_fitness_storage", return_value=ms):
             r = await delete_fitness_entry(mock_tool_context, "workout", 1)
         assert r["status"] == "error"
 
@@ -314,7 +314,7 @@ class TestContextFileErrors:
             (ctx / "link.md").symlink_to(secret)
         except OSError:
             pytest.skip("symlinks not supported")
-        with patch("agent.tools.get_context_dir", return_value=ctx):
+        with patch("agent.tools.context_files.get_context_dir", return_value=ctx):
             r = read_context_file(
                 MockToolContext(state=MockState({})),  # type: ignore[arg-type]
                 "link.md",
@@ -332,7 +332,7 @@ class TestContextFileErrors:
             raise OSError("io")
 
         with (
-            patch("agent.tools.get_context_dir", return_value=ctx),
+            patch("agent.tools.context_files.get_context_dir", return_value=ctx),
             patch.object(Path, "read_text", _bad_read),
         ):
             r = read_context_file(
@@ -349,7 +349,7 @@ class TestContextFileErrors:
             raise OSError("w")
 
         with (
-            patch("agent.tools.get_context_dir", return_value=ctx),
+            patch("agent.tools.context_files.get_context_dir", return_value=ctx),
             patch.object(Path, "write_text", _bad_write),
         ):
             r = write_context_file(
@@ -362,7 +362,7 @@ class TestContextFileErrors:
     def test_delete_invalid_filename_returns_error(self, tmp_path: Path) -> None:
         ctx = tmp_path / "delctx-invalid"
         ctx.mkdir()
-        with patch("agent.tools.get_context_dir", return_value=ctx):
+        with patch("agent.tools.context_files.get_context_dir", return_value=ctx):
             r = delete_context_file(
                 MockToolContext(state=MockState({})),  # type: ignore[arg-type]
                 "",
@@ -372,7 +372,7 @@ class TestContextFileErrors:
     def test_delete_success_and_missing(self, tmp_path: Path) -> None:
         ctx = tmp_path / "dctx"
         ctx.mkdir()
-        with patch("agent.tools.get_context_dir", return_value=ctx):
+        with patch("agent.tools.context_files.get_context_dir", return_value=ctx):
             write_context_file(
                 MockToolContext(state=MockState({})),  # type: ignore[arg-type]
                 "D.md",
@@ -399,7 +399,7 @@ class TestContextFileErrors:
             raise OSError("u")
 
         with (
-            patch("agent.tools.get_context_dir", return_value=ctx),
+            patch("agent.tools.context_files.get_context_dir", return_value=ctx),
             patch.object(Path, "unlink", _bad_unlink),
         ):
             r = delete_context_file(
@@ -417,7 +417,7 @@ class TestContextFileErrors:
             raise OSError("list")
 
         with (
-            patch("agent.tools.get_context_dir", return_value=ctx),
+            patch("agent.tools.context_files.get_context_dir", return_value=ctx),
             patch.object(Path, "iterdir", _bad_iterdir),
         ):
             r = list_context_files(
@@ -431,7 +431,7 @@ class TestClaudeWorkdirResolution:
 
     def test_returns_cwd_when_requested_path_not_directory(self) -> None:
         """Non-existent directory should fall back to cwd."""
-        from agent.tools import _resolve_claude_workdir
+        from agent.tools.claude_coding import _resolve_claude_workdir
 
         with patch.object(Path, "is_dir", return_value=False):
             result = _resolve_claude_workdir("/nonexistent/path")
@@ -440,7 +440,7 @@ class TestClaudeWorkdirResolution:
 
     def test_returns_requested_path_when_directory_exists(self) -> None:
         """Valid directory should be returned as-is."""
-        from agent.tools import _resolve_claude_workdir
+        from agent.tools.claude_coding import _resolve_claude_workdir
 
         with patch.object(Path, "is_dir", return_value=True):
             result = _resolve_claude_workdir("/valid/path")
@@ -449,7 +449,7 @@ class TestClaudeWorkdirResolution:
 
     def test_uses_default_when_workdir_is_none(self) -> None:
         """None workdir should use default path."""
-        from agent.tools import _resolve_claude_workdir
+        from agent.tools.claude_coding import _resolve_claude_workdir
 
         with patch.object(Path, "is_dir", return_value=True):
             result = _resolve_claude_workdir(None)
@@ -462,14 +462,14 @@ class TestSplitPlainTextForTelegram:
 
     def test_returns_empty_list_for_empty_text(self) -> None:
         """Empty input should return empty list."""
-        from agent.tools import _split_plain_text_for_telegram
+        from agent.tools.claude_coding import _split_plain_text_for_telegram
 
         result = _split_plain_text_for_telegram("")
         assert result == []
 
     def test_returns_empty_list_for_none_text(self) -> None:
         """None-like input should return empty list."""
-        from agent.tools import _split_plain_text_for_telegram
+        from agent.tools.claude_coding import _split_plain_text_for_telegram
 
         result = _split_plain_text_for_telegram("")
         assert result == []
@@ -481,16 +481,16 @@ class TestSendBackgroundClaudeJobResultEdgeCases:
     @pytest.mark.asyncio
     async def test_sends_stderr_when_present(self) -> None:
         """stderr should be included in output sections."""
-        from agent.tools import _send_background_claude_job_result
+        from agent.tools.claude_coding import _send_background_claude_job_result
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock()
         mock_notification_service = MagicMock()
-        mock_notification_service._bot = mock_bot
-        mock_notification_service.bot = mock_bot
+        mock_notification_service.configure_mock(_bot=mock_bot)
+        type(mock_notification_service).bot = property(lambda self: mock_bot)
 
         with patch(
-            "agent.telegram.notifications.get_notification_service",
+            "agent.tools.claude_coding.get_notification_service",
             return_value=mock_notification_service,
         ):
             await _send_background_claude_job_result(
@@ -514,16 +514,16 @@ class TestSendBackgroundClaudeJobResultEdgeCases:
     @pytest.mark.asyncio
     async def test_sends_truncated_message_when_output_truncated(self) -> None:
         """Truncated output should be indicated in summary."""
-        from agent.tools import _send_background_claude_job_result
+        from agent.tools.claude_coding import _send_background_claude_job_result
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock()
         mock_notification_service = MagicMock()
-        mock_notification_service._bot = mock_bot
-        mock_notification_service.bot = mock_bot
+        mock_notification_service.configure_mock(_bot=mock_bot)
+        type(mock_notification_service).bot = property(lambda self: mock_bot)
 
         with patch(
-            "agent.telegram.notifications.get_notification_service",
+            "agent.tools.claude_coding.get_notification_service",
             return_value=mock_notification_service,
         ):
             await _send_background_claude_job_result(
@@ -545,16 +545,16 @@ class TestSendBackgroundClaudeJobResultEdgeCases:
     @pytest.mark.asyncio
     async def test_sends_error_message_when_no_stdout_stderr(self) -> None:
         """Error message should be sent when no stdout/stderr."""
-        from agent.tools import _send_background_claude_job_result
+        from agent.tools.claude_coding import _send_background_claude_job_result
 
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock()
         mock_notification_service = MagicMock()
-        mock_notification_service._bot = mock_bot
-        mock_notification_service.bot = mock_bot
+        mock_notification_service.configure_mock(_bot=mock_bot)
+        type(mock_notification_service).bot = property(lambda self: mock_bot)
 
         with patch(
-            "agent.telegram.notifications.get_notification_service",
+            "agent.tools.claude_coding.get_notification_service",
             return_value=mock_notification_service,
         ):
             await _send_background_claude_job_result(
@@ -579,7 +579,7 @@ class TestSendBackgroundClaudeJobResultEdgeCases:
         """Should log warning and return early when bot is unavailable."""
         import logging
 
-        from agent.tools import _send_background_claude_job_result
+        from agent.tools.claude_coding import _send_background_claude_job_result
 
         caplog.set_level(logging.WARNING, logger="agent.tools")
 
@@ -587,7 +587,7 @@ class TestSendBackgroundClaudeJobResultEdgeCases:
         mock_notification_service._bot = None
 
         with patch(
-            "agent.telegram.notifications.get_notification_service",
+            "agent.tools.claude_coding.get_notification_service",
             return_value=mock_notification_service,
         ):
             await _send_background_claude_job_result(
@@ -610,7 +610,7 @@ class TestRunBackgroundClaudeJobException:
         """Should log exception when sending result fails."""
         import logging
 
-        from agent.tools import _run_background_claude_job
+        from agent.tools.claude_coding import _run_background_claude_job
 
         caplog.set_level(logging.ERROR, logger="agent.tools")
 
@@ -626,11 +626,11 @@ class TestRunBackgroundClaudeJobException:
 
         with (
             patch(
-                "agent.tools._execute_claude_coding_subprocess",
+                "agent.tools.claude_coding._execute_claude_coding_subprocess",
                 side_effect=mock_execute,
             ),
             patch(
-                "agent.tools._send_background_claude_job_result",
+                "agent.tools.claude_coding._send_background_claude_job_result",
                 side_effect=mock_send,
             ),
         ):
@@ -654,7 +654,7 @@ class TestStartBackgroundClaudeJob:
     async def test_starts_job_and_returns_job_id(self) -> None:
         """Should start background job and return a job ID."""
 
-        from agent.tools import (
+        from agent.tools.claude_coding import (
             _ACTIVE_BACKGROUND_CLAUDE_JOBS,
             _start_background_claude_job,
         )
@@ -672,7 +672,7 @@ class TestStartBackgroundClaudeJob:
 
         with (
             patch(
-                "agent.tools._execute_claude_coding_subprocess",
+                "agent.tools.claude_coding._execute_claude_coding_subprocess",
                 side_effect=mock_execute,
             ),
             patch(
@@ -707,7 +707,7 @@ class TestTrackBackgroundClaudeJob:
     async def test_cleanup_removes_job_from_active_dict(self) -> None:
         """Completed task should be removed from active jobs dict."""
 
-        from agent.tools import (
+        from agent.tools.claude_coding import (
             _ACTIVE_BACKGROUND_CLAUDE_JOBS,
             _track_background_claude_job,
         )
@@ -728,7 +728,7 @@ class TestTrackBackgroundClaudeJob:
     async def test_cleanup_handles_cancelled_task(self) -> None:
         """Cancelled task cleanup should not raise."""
 
-        from agent.tools import (
+        from agent.tools.claude_coding import (
             _ACTIVE_BACKGROUND_CLAUDE_JOBS,
             _track_background_claude_job,
         )

@@ -44,13 +44,6 @@ load_dotenv()
 
 from ..agent import app  # noqa: E402
 from ..reminders import get_scheduler  # noqa: E402
-from ..telegram_prefs import (  # noqa: E402
-    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
-    TELEGRAM_SESSION_PROVIDER_KEY,
-    TELEGRAM_USAGE_COMPLETION_KEY,
-    TELEGRAM_USAGE_PROMPT_KEY,
-    TELEGRAM_USAGE_TOTAL_KEY,
-)
 from ..utils.session import create_session_service_for_runner  # noqa: E402
 from ..utils.telegram_outbox import PendingTelegramFile  # noqa: E402
 from .handler import (  # noqa: E402
@@ -68,6 +61,13 @@ from .model_settings import (  # noqa: E402
     resolve_model_freeform,
 )
 from .notifications import get_notification_service  # noqa: E402
+from .prefs import (  # noqa: E402
+    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
+    TELEGRAM_SESSION_PROVIDER_KEY,
+    TELEGRAM_USAGE_COMPLETION_KEY,
+    TELEGRAM_USAGE_PROMPT_KEY,
+    TELEGRAM_USAGE_TOTAL_KEY,
+)
 from .session_state import merge_session_state_delta  # noqa: E402
 
 # Configure logging

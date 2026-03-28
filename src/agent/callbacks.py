@@ -16,7 +16,7 @@ from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import ToolContext
 from google.adk.tools.base_tool import BaseTool
 
-from .telegram_prefs import (
+from .telegram.prefs import (
     TELEGRAM_USAGE_COMPLETION_KEY,
     TELEGRAM_USAGE_PROMPT_KEY,
     TELEGRAM_USAGE_TOTAL_KEY,

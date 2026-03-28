@@ -15,7 +15,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.plugins.base_plugin import BasePlugin
 
-from .litellm_session_router import CURRENT_TELEGRAM_LITELLM_MODEL
+from ..litellm_session_router import CURRENT_TELEGRAM_LITELLM_MODEL
 
 
 class TelegramLitellmRequestModelPlugin(BasePlugin):

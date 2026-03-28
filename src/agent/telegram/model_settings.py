@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Literal
 
-from ..telegram_prefs import (
+from .prefs import (
     TELEGRAM_SESSION_LITELLM_MODEL_KEY,
     TELEGRAM_SESSION_PROVIDER_KEY,
 )

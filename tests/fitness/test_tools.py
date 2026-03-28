@@ -46,7 +46,7 @@ class TestAddCalories:
     @pytest.mark.asyncio
     async def test_add_calories_success(self, mock_tool_context: ToolContext) -> None:
         """Test adding calories successfully."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_calorie_entry = AsyncMock(return_value=1)
             mock_get_storage.return_value = mock_storage
@@ -110,7 +110,7 @@ class TestListCalories:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(return_value=[mock_entry])
             mock_get_storage.return_value = mock_storage
@@ -124,7 +124,7 @@ class TestListCalories:
     @pytest.mark.asyncio
     async def test_list_calories_empty(self, mock_tool_context: ToolContext) -> None:
         """Test listing calories when empty."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(return_value=[])
             mock_get_storage.return_value = mock_storage
@@ -143,7 +143,7 @@ class TestGetCalorieStats:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test getting calorie stats successfully."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_stats = AsyncMock(
                 return_value={
@@ -166,7 +166,7 @@ class TestLogWorkout:
     @pytest.mark.asyncio
     async def test_log_workout_success(self, mock_tool_context: ToolContext) -> None:
         """Test logging workout successfully."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_workout_entry = AsyncMock(return_value=1)
             mock_get_storage.return_value = mock_storage
@@ -218,7 +218,7 @@ class TestListWorkouts:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_entries = AsyncMock(return_value=[mock_entry])
             mock_get_storage.return_value = mock_storage
@@ -237,7 +237,7 @@ class TestGetWorkoutStats:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test getting workout stats successfully."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_stats = AsyncMock(
                 return_value={
@@ -260,7 +260,7 @@ class TestDeleteFitnessEntry:
     @pytest.mark.asyncio
     async def test_delete_calorie_entry(self, mock_tool_context: ToolContext) -> None:
         """Test deleting a calorie entry."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.delete_entry = AsyncMock(return_value=True)
             mock_get_storage.return_value = mock_storage
@@ -276,7 +276,7 @@ class TestDeleteFitnessEntry:
     @pytest.mark.asyncio
     async def test_delete_workout_entry(self, mock_tool_context: ToolContext) -> None:
         """Test deleting a workout entry."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.delete_entry = AsyncMock(return_value=True)
             mock_get_storage.return_value = mock_storage
@@ -359,7 +359,9 @@ class TestContextFileTools:
             from unittest.mock import patch
 
             fake_path = Path(tmpdir) / "nonexistent"
-            with patch("agent.tools.get_context_dir", return_value=fake_path):
+            with patch(
+                "agent.tools.context_files.get_context_dir", return_value=fake_path
+            ):
                 result = list_context_files(mock_tool_context)
 
                 assert result["status"] == "success"
@@ -376,7 +378,9 @@ class TestContextFileTools:
             context_dir = Path(tmpdir)
             from unittest.mock import patch
 
-            with patch("agent.tools.get_context_dir", return_value=context_dir):
+            with patch(
+                "agent.tools.context_files.get_context_dir", return_value=context_dir
+            ):
                 # Write a file
                 write_result = write_context_file(
                     mock_tool_context, "TEST.md", "# Test Content\nHello World"
@@ -410,7 +414,9 @@ class TestContextFileTools:
             (context_dir / "VISIBLE.md").write_text("visible")
             (context_dir / ".hidden").write_text("hidden")
 
-            with patch("agent.tools.get_context_dir", return_value=context_dir):
+            with patch(
+                "agent.tools.context_files.get_context_dir", return_value=context_dir
+            ):
                 result = list_context_files(mock_tool_context)
 
                 assert result["status"] == "success"
@@ -431,7 +437,7 @@ class TestFitnessToolsErrors:
     @pytest.mark.asyncio
     async def test_add_calories_exception(self, mock_tool_context: ToolContext) -> None:
         """Test add_calories handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_calorie_entry = AsyncMock(
                 side_effect=Exception("DB error")
@@ -462,7 +468,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test list_calories handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(
                 side_effect=Exception("DB error")
@@ -491,7 +497,7 @@ class TestFitnessToolsErrors:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(return_value=[mock_entry])
             mock_get_storage.return_value = mock_storage
@@ -518,7 +524,7 @@ class TestFitnessToolsErrors:
             created_at=datetime.now(UTC).isoformat(),
         )
 
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_entries = AsyncMock(return_value=[mock_entry])
             mock_get_storage.return_value = mock_storage
@@ -543,7 +549,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test get_calorie_stats handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_calorie_stats = AsyncMock(
                 side_effect=Exception("DB error")
@@ -571,7 +577,7 @@ class TestFitnessToolsErrors:
     @pytest.mark.asyncio
     async def test_log_workout_exception(self, mock_tool_context: ToolContext) -> None:
         """Test log_workout handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_workout_entry = AsyncMock(
                 side_effect=Exception("DB error")
@@ -591,7 +597,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test log_workout with all optional details."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.add_workout_entry = AsyncMock(return_value=1)
             mock_get_storage.return_value = mock_storage
@@ -621,7 +627,7 @@ class TestFitnessToolsErrors:
     @pytest.mark.asyncio
     async def test_list_workouts_empty(self, mock_tool_context: ToolContext) -> None:
         """Test list_workouts when empty."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_entries = AsyncMock(return_value=[])
             mock_get_storage.return_value = mock_storage
@@ -636,7 +642,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test list_workouts handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_entries = AsyncMock(
                 side_effect=Exception("DB error")
@@ -663,7 +669,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test get_workout_stats handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.get_workout_stats = AsyncMock(
                 side_effect=Exception("DB error")
@@ -694,7 +700,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test delete_fitness_entry when entry not found."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.delete_entry = AsyncMock(return_value=False)
             mock_get_storage.return_value = mock_storage
@@ -713,7 +719,7 @@ class TestFitnessToolsErrors:
         self, mock_tool_context: ToolContext
     ) -> None:
         """Test delete_fitness_entry handles exceptions."""
-        with patch("agent.tools.get_fitness_storage") as mock_get_storage:
+        with patch("agent.fitness.tools.get_fitness_storage") as mock_get_storage:
             mock_storage = AsyncMock()
             mock_storage.delete_entry = AsyncMock(side_effect=Exception("DB error"))
             mock_get_storage.return_value = mock_storage

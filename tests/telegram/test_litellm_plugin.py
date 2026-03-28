@@ -6,7 +6,7 @@ import pytest
 from google.adk.models.llm_request import LlmRequest
 
 from agent.litellm_session_router import CURRENT_TELEGRAM_LITELLM_MODEL
-from agent.telegram_litellm_request_plugin import TelegramLitellmRequestModelPlugin
+from agent.telegram import TelegramLitellmRequestModelPlugin
 
 
 @pytest.mark.asyncio
