@@ -21,7 +21,7 @@ Always plan the message title and body before creating a git commit. Follow the 
 
 # GitHub Issue Rules
 
-- Always add a Priority and a Level of Effort estimate to github issues
+- Always add a Priority and a Level of Effort estimate to GitHub issues
 - Always run `gh label list` and add an appropriate label from the existing labels available in the repository
 - Always create a `Sources` section that includes verified documentation URLs, examples, file links, etc. to support issue contents
 - Always include **passing criteria** (or **definition of done**) that state how to
@@ -72,7 +72,7 @@ Delegate to the agent to:
 - Update `CHANGELOG.md` using the "Keep A Changelog" format:
   - Convert [Unreleased] to [X.Y.Z] - YYYY-MM-DD
   - Add new empty [Unreleased] section with no subheadings
-  - Update version comparison links after verifying the remote config using `git remote -v `
+  - Update version comparison links after verifying the remote config using `git remote -v`
 - Create feature branch (e.g., `release/v0.9.0`)
 - Create commit with version bump
 - Push branch to remote

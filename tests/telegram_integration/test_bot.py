@@ -585,8 +585,8 @@ class TestSendLongMessage:
         assert "\n\n" in call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_split_and_send(self) -> None:
-        """Test that _split_and_send is called for very long paragraphs."""
+    async def test_falls_back_to_coarse_split_for_long_paragraph(self) -> None:
+        """Very long single paragraphs use newline/space/coarse splitting."""
         mock_message = MagicMock()
         mock_message.reply_text = AsyncMock()
 
@@ -595,7 +595,6 @@ class TestSendLongMessage:
 
         await _send_long_message(mock_message, long_paragraph)
 
-        # Should split via _split_and_send
         assert mock_message.reply_text.call_count >= 2
 
     @pytest.mark.asyncio
