@@ -23,7 +23,6 @@ from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai import types
 
 from ..litellm_session_router import CURRENT_TELEGRAM_LITELLM_MODEL
-from ..telegram_prefs import TELEGRAM_SESSION_LITELLM_MODEL_KEY
 from ..utils.app_timezone import format_stored_instant_for_display
 from ..utils.telegram_outbox import (
     PendingTelegramFile,
@@ -32,6 +31,7 @@ from ..utils.telegram_outbox import (
     end_telegram_file_batch,
 )
 from .model_settings import default_root_model
+from .prefs import TELEGRAM_SESSION_LITELLM_MODEL_KEY
 
 if TYPE_CHECKING:
     pass

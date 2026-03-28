@@ -9,12 +9,65 @@ import os
 import sys
 import uuid
 
+from opentelemetry import trace as trace_api
 from opentelemetry.sdk.resources import (
     SERVICE_INSTANCE_ID,
     SERVICE_NAME,
     SERVICE_NAMESPACE,
     SERVICE_VERSION,
+    Resource,
 )
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+
+def _sdk_tracer_provider_is_installed() -> bool:
+    """True once a real SDK TracerProvider is registered (vs default proxy / noop).
+
+    Never use a probe span for this: after OTLP is enabled, ``start_span`` would
+    create a real exported span named e.g. ``otel_provider_probe`` on every
+    subsequent ``configure_otel_resource`` call, polluting Langfuse.
+    """
+    return isinstance(trace_api.get_tracer_provider(), TracerProvider)
+
+
+def _install_otlp_tracer_provider_from_env() -> None:
+    """Attach an SDK TracerProvider with OTLP export when env requests it.
+
+    Setting ``OTEL_EXPORTER_OTLP_*`` alone does not register an exporter in the
+    OpenTelemetry Python API: ``GoogleADKInstrumentor`` uses
+    ``trace.get_tracer_provider()``, which otherwise stays on a no-op pipeline, so
+    spans never leave the process.
+    """
+    if not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip():
+        return
+    if _sdk_tracer_provider_is_installed():
+        return
+
+    protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf").strip().lower()
+    uses_grpc = protocol in ("grpc", "grpc/gzip")
+
+    resource = Resource.create()
+    if uses_grpc:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter as GrpcOTLPSpanExporter,
+        )
+
+        provider = TracerProvider(resource=resource)
+        provider.add_span_processor(
+            BatchSpanProcessor(GrpcOTLPSpanExporter()),
+        )
+    else:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter as HttpOTLPSpanExporter,
+        )
+
+        provider = TracerProvider(resource=resource)
+        provider.add_span_processor(
+            BatchSpanProcessor(HttpOTLPSpanExporter()),
+        )
+    trace_api.set_tracer_provider(provider)
+    print("✅ OpenTelemetry SDK tracer provider installed (OTLP export enabled)")
 
 
 def configure_otel_resource(agent_name: str) -> None:
@@ -68,6 +121,8 @@ def configure_otel_resource(agent_name: str) -> None:
 
         endpoint = os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
         print(f"✅ Langfuse OTLP configured for endpoint: {endpoint}")
+
+    _install_otlp_tracer_provider_from_env()
 
 
 def setup_logging(log_level: str) -> None:

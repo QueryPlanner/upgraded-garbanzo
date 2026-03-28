@@ -2,6 +2,10 @@
 
 import pytest
 
+from agent.telegram import (
+    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
+    TELEGRAM_SESSION_PROVIDER_KEY,
+)
 from agent.telegram.model_settings import (
     active_provider_for_session_state,
     default_root_model,
@@ -11,10 +15,6 @@ from agent.telegram.model_settings import (
     resolve_flat_menu_index,
     resolve_model_argument,
     resolve_model_freeform,
-)
-from agent.telegram_prefs import (
-    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
-    TELEGRAM_SESSION_PROVIDER_KEY,
 )
 
 

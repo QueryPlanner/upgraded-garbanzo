@@ -68,7 +68,9 @@ class TestBraveWebSearch:
         }
         response.raise_for_status.return_value = None
 
-        with patch("agent.tools.httpx.get", return_value=response) as mock_get:
+        with patch(
+            "agent.tools.brave_search.httpx.get", return_value=response
+        ) as mock_get:
             result = brave_web_search(
                 tool_context,  # type: ignore[arg-type]
                 query="python testing",
@@ -130,7 +132,7 @@ class TestBraveWebSearch:
         tool_context = MockToolContext(state=MockState({}))
 
         with patch(
-            "agent.tools.httpx.get",
+            "agent.tools.brave_search.httpx.get",
             side_effect=httpx.TimeoutException("timed out"),
         ):
             result = brave_web_search(tool_context, query="python")  # type: ignore[arg-type]
@@ -150,7 +152,7 @@ class TestBraveWebSearch:
             "rate limited", request=request, response=response
         )
 
-        with patch("agent.tools.httpx.get", side_effect=error):
+        with patch("agent.tools.brave_search.httpx.get", side_effect=error):
             result = brave_web_search(tool_context, query="python")  # type: ignore[arg-type]
 
         assert result["status"] == "error"

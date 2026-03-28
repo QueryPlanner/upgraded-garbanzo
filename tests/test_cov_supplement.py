@@ -763,9 +763,9 @@ class TestBotExtraBranches:
             InMemorySessionService,
         )
 
+        from agent.telegram import TELEGRAM_USAGE_PROMPT_KEY
         from agent.telegram.bot import model_command, tokens_command
         from agent.telegram.session_state import merge_session_state_delta
-        from agent.telegram_prefs import TELEGRAM_USAGE_PROMPT_KEY
 
         svc = InMemorySessionService()
         mock_h = MagicMock()

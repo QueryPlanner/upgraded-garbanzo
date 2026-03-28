@@ -3,8 +3,8 @@
 import pytest
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 
+from agent.telegram import TELEGRAM_SESSION_LITELLM_MODEL_KEY
 from agent.telegram.session_state import merge_session_state_delta
-from agent.telegram_prefs import TELEGRAM_SESSION_LITELLM_MODEL_KEY
 
 
 @pytest.mark.asyncio

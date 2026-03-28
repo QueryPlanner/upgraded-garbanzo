@@ -32,9 +32,7 @@ from .prompt import (  # noqa: E402
     return_instruction_root,
 )
 from .skills.loader import create_skill_toolset  # noqa: E402
-from .telegram_litellm_request_plugin import (  # noqa: E402
-    TelegramLitellmRequestModelPlugin,
-)
+from .telegram import TelegramLitellmRequestModelPlugin  # noqa: E402
 
 __all__ = ["root_agent", "app"]
 from .tools import (  # noqa: E402

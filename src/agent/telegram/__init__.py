@@ -2,29 +2,27 @@
 
 This module provides a Telegram bot that bridges messages between Telegram
 and the ADK agent, allowing users to interact with the agent via Telegram.
+
+Note: The bot module is not imported here to avoid circular imports with agent.py.
+Import from agent.telegram.bot directly when needed.
 """
 
-from .bot import create_application, main, run_bot
-from .handler import (
-    TelegramAgentReply,
-    TelegramHandler,
-    initialize_runner,
-    process_message,
-    reset_session,
-)
+from .litellm_plugin import TelegramLitellmRequestModelPlugin
 from .markdown_converter import convert_markdown_to_telegram
-from .notifications import ToolNotificationService, get_notification_service
+from .prefs import (
+    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
+    TELEGRAM_SESSION_PROVIDER_KEY,
+    TELEGRAM_USAGE_COMPLETION_KEY,
+    TELEGRAM_USAGE_PROMPT_KEY,
+    TELEGRAM_USAGE_TOTAL_KEY,
+)
 
 __all__ = [
-    "TelegramAgentReply",
-    "TelegramHandler",
-    "ToolNotificationService",
+    "TELEGRAM_SESSION_LITELLM_MODEL_KEY",
+    "TELEGRAM_SESSION_PROVIDER_KEY",
+    "TELEGRAM_USAGE_COMPLETION_KEY",
+    "TELEGRAM_USAGE_PROMPT_KEY",
+    "TELEGRAM_USAGE_TOTAL_KEY",
+    "TelegramLitellmRequestModelPlugin",
     "convert_markdown_to_telegram",
-    "create_application",
-    "get_notification_service",
-    "initialize_runner",
-    "main",
-    "process_message",
-    "reset_session",
-    "run_bot",
 ]

@@ -15,14 +15,8 @@ import pytest
 from conftest import MockState, MockToolContext
 
 from agent.reminders import Reminder, ReminderScheduler, ReminderStorage
+from agent.reminders.tools import _parse_reminder_datetime
 from agent.tools import (
-    _agent_runs_inside_docker,
-    _existing_file_if_text_body_is_path_string,
-    _parse_reminder_datetime,
-    _resolve_agent_data_or_host_path,
-    _truncate_output,
-    _validate_agent_data_relative_path,
-    _validate_single_download_filename,
     cancel_reminder,
     docker_bash_execute,
     example_tool,
@@ -30,6 +24,13 @@ from agent.tools import (
     list_reminders,
     schedule_reminder,
     send_telegram_file,
+)
+from agent.tools.docker import _agent_runs_inside_docker, _truncate_output
+from agent.tools.telegram_files import (
+    _existing_file_if_text_body_is_path_string,
+    _resolve_agent_data_or_host_path,
+    _validate_agent_data_relative_path,
+    _validate_single_download_filename,
 )
 from agent.utils.telegram_outbox import (
     TelegramFileOutboxError,
@@ -279,7 +280,7 @@ class TestScheduleReminder:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
 
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 state = MockState({"user_id": "test_user"})
                 tool_context = MockToolContext(state=state)
 
@@ -306,7 +307,7 @@ class TestScheduleReminder:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
 
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 state = MockState({"user_id": "test_user"})
                 tool_context = MockToolContext(state=state)
 
@@ -382,7 +383,7 @@ class TestListReminders:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
 
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 state = MockState({"user_id": "test_user"})
                 tool_context = MockToolContext(state=state)
 
@@ -404,7 +405,7 @@ class TestListReminders:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
 
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 state = MockState({"user_id": "test_user"})
                 tool_context = MockToolContext(state=state)
 
@@ -453,7 +454,7 @@ class TestCancelReminder:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
 
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 state = MockState({"user_id": "test_user"})
                 tool_context = MockToolContext(state=state)
 
@@ -472,7 +473,7 @@ class TestCancelReminder:
         state = MockState({"user_id": "test_user"})
         tool_context = MockToolContext(state=state)
 
-        with patch("agent.tools.get_scheduler") as mock_get_scheduler:
+        with patch("agent.reminders.tools.get_scheduler") as mock_get_scheduler:
             mock_scheduler = MagicMock()
             mock_scheduler.delete_reminder = AsyncMock(
                 side_effect=Exception("DB error")
@@ -500,7 +501,7 @@ class TestScheduleReminderBranches:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
             tool_context = MockToolContext(state=MockState({}), user_id="attr-user")
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 result = await schedule_reminder(
                     tool_context,  # type: ignore
                     message="Hi",
@@ -519,7 +520,7 @@ class TestScheduleReminderBranches:
             scheduler = ReminderScheduler()
             scheduler.storage = storage
             long_msg = "M" * 80
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 result = await schedule_reminder(
                     MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
                     message=long_msg,
@@ -537,7 +538,7 @@ class TestScheduleReminderBranches:
         scheduler.storage.initialize = AsyncMock()
         scheduler.schedule_reminder = AsyncMock(side_effect=RuntimeError("db"))
 
-        with patch("agent.tools.get_scheduler", return_value=scheduler):
+        with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
             result = await schedule_reminder(
                 MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
                 message="x",
@@ -561,7 +562,7 @@ class TestListRemindersBranches:
         )
         scheduler.get_user_reminders = AsyncMock(return_value=[past])
 
-        with patch("agent.tools.get_scheduler", return_value=scheduler):
+        with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
             result = await list_reminders(
                 MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
             )
@@ -574,7 +575,7 @@ class TestListRemindersBranches:
         scheduler = MagicMock()
         scheduler.get_user_reminders = AsyncMock(side_effect=ValueError("bad"))
 
-        with patch("agent.tools.get_scheduler", return_value=scheduler):
+        with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
             result = await list_reminders(
                 MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
             )
@@ -600,7 +601,7 @@ class TestCancelReminderBranches:
                     created_at="2026-04-01T10:00:00",
                 )
             )
-            with patch("agent.tools.get_scheduler", return_value=scheduler):
+            with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
                 result = await cancel_reminder(
                     MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
                     reminder_id=rid,
@@ -615,7 +616,7 @@ class TestCancelReminderBranches:
         scheduler = MagicMock()
         scheduler.delete_reminder = AsyncMock(return_value=False)
 
-        with patch("agent.tools.get_scheduler", return_value=scheduler):
+        with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
             result = await cancel_reminder(
                 MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
                 reminder_id=99,
@@ -628,7 +629,7 @@ class TestCancelReminderBranches:
         scheduler = MagicMock()
         scheduler.delete_reminder = AsyncMock(side_effect=RuntimeError("x"))
 
-        with patch("agent.tools.get_scheduler", return_value=scheduler):
+        with patch("agent.reminders.tools.get_scheduler", return_value=scheduler):
             result = await cancel_reminder(
                 MockToolContext(state=MockState({"user_id": "u"})),  # type: ignore
                 reminder_id=1,
@@ -640,7 +641,7 @@ class TestParseReminderDatetimeBranches:
     def test_timezone_aware_parse_uses_astimezone_branch(self) -> None:
         ist = ZoneInfo("Asia/Kolkata")
         aware = datetime(2026, 6, 1, 12, 0, tzinfo=ist)
-        with patch("agent.tools.dateparser.parse", return_value=aware):
+        with patch("agent.reminders.tools.dateparser.parse", return_value=aware):
             out = _parse_reminder_datetime("ignored input")
         assert out.tzinfo == UTC
 
@@ -654,7 +655,7 @@ class TestScheduleReminderExceptions:
         state = MockState({"user_id": "test_user"})
         tool_context = MockToolContext(state=state)
 
-        with patch("agent.tools.get_scheduler") as mock_get_scheduler:
+        with patch("agent.reminders.tools.get_scheduler") as mock_get_scheduler:
             mock_scheduler = MagicMock()
             mock_scheduler.schedule_reminder = AsyncMock(
                 side_effect=Exception("DB error")
@@ -680,7 +681,7 @@ class TestListRemindersExceptions:
         state = MockState({"user_id": "test_user"})
         tool_context = MockToolContext(state=state)
 
-        with patch("agent.tools.get_scheduler") as mock_get_scheduler:
+        with patch("agent.reminders.tools.get_scheduler") as mock_get_scheduler:
             mock_scheduler = MagicMock()
             mock_scheduler.get_user_reminders = AsyncMock(
                 side_effect=Exception("DB error")
@@ -722,7 +723,7 @@ class TestDockerBashExecute:
     async def test_disabled_when_not_in_docker(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=False):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=False):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "echo hi",
@@ -734,7 +735,7 @@ class TestDockerBashExecute:
     async def test_rejects_empty_command(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "   ",
@@ -746,7 +747,7 @@ class TestDockerBashExecute:
     async def test_rejects_oversized_command(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "x" * 13_000,
@@ -758,7 +759,7 @@ class TestDockerBashExecute:
     async def test_runs_echo(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "echo hello",
@@ -772,7 +773,7 @@ class TestDockerBashExecute:
     async def test_large_stdout_truncated(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "python3 -c \"print('x' * 200000)\"",
@@ -784,7 +785,7 @@ class TestDockerBashExecute:
     async def test_timeout_seconds_clamped_low(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "echo ok",
@@ -796,7 +797,7 @@ class TestDockerBashExecute:
     async def test_timeout_seconds_clamped_high(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "echo ok",
@@ -809,9 +810,9 @@ class TestDockerBashExecute:
         state = MockState({})
         tool_context = MockToolContext(state=state)
         with (
-            patch("agent.tools._agent_runs_inside_docker", return_value=True),
+            patch("agent.tools.docker._agent_runs_inside_docker", return_value=True),
             patch(
-                "agent.tools.asyncio.create_subprocess_exec",
+                "agent.tools.docker.asyncio.create_subprocess_exec",
                 side_effect=OSError("no bash"),
             ),
         ):
@@ -826,7 +827,7 @@ class TestDockerBashExecute:
     async def test_times_out(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "sleep 5",
@@ -840,7 +841,7 @@ class TestDockerBashExecute:
     async def test_nonzero_exit_still_returns_output(self) -> None:
         state = MockState({})
         tool_context = MockToolContext(state=state)
-        with patch("agent.tools._agent_runs_inside_docker", return_value=True):
+        with patch("agent.tools.docker._agent_runs_inside_docker", return_value=True):
             result = await docker_bash_execute(
                 tool_context,  # type: ignore[arg-type]
                 "echo out >&1; echo err >&2; exit 7",
@@ -864,14 +865,14 @@ class TestSendTelegramFile:
                 text_file_name="f.txt",
             )
             assert result["status"] == "error"
-            assert "user_id" in result["message"]
+            assert "user not identified" in result["message"].lower()
         finally:
             end_telegram_file_batch()
 
     def test_requires_active_telegram_batch(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
@@ -884,18 +885,18 @@ class TestSendTelegramFile:
     def test_rejects_multiple_sources(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         try:
             tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
             result = send_telegram_file(
                 tool_context,  # type: ignore[arg-type]
-                context_filename="A.md",
-                text_file_body="x",
                 text_file_name="b.txt",
+                agent_data_path="A.md",
+                text_file_body="x",
             )
             assert result["status"] == "error"
-            assert "exactly one" in result["message"]
+            assert "only one" in result["message"].lower()
         finally:
             discard = end_telegram_file_batch()
             for p in discard:
@@ -904,7 +905,7 @@ class TestSendTelegramFile:
     def test_inline_text_staged_and_registered(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
@@ -913,7 +914,7 @@ class TestSendTelegramFile:
             text_file_name="note.txt",
             caption="see file",
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert len(pending) == 1
         assert pending[0].caption == "see file"
@@ -924,7 +925,7 @@ class TestSendTelegramFile:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """LLMs often pass structured exports as dict; coerce to JSON text."""
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         payload = {
@@ -942,7 +943,7 @@ class TestSendTelegramFile:
             text_file_body=payload,
             text_file_name="export.json",
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         written = pending[0].path.read_text(encoding="utf-8")
         assert json.loads(written) == payload
@@ -951,12 +952,12 @@ class TestSendTelegramFile:
     def test_invalid_text_file_body_type_returns_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
-            text_file_body=42,
+            text_file_body=42,  # type: ignore[arg-type]
             text_file_name="x.txt",
         )
         assert result["status"] == "error"
@@ -966,7 +967,7 @@ class TestSendTelegramFile:
     def test_dict_body_not_json_serializable_returns_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         circular: dict[str, object] = {}
@@ -984,7 +985,7 @@ class TestSendTelegramFile:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """If the model puts a file path in text_file_body, send that file's bytes."""
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         script = tmp_path / "real.py"
         script.write_text("print('hello')\n", encoding="utf-8")
         begin_telegram_file_batch()
@@ -994,7 +995,7 @@ class TestSendTelegramFile:
             text_file_body=str(script.resolve()),
             text_file_name="agent.py",
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert len(pending) == 1
         assert pending[0].path.read_text(encoding="utf-8") == "print('hello')\n"
@@ -1005,7 +1006,7 @@ class TestSendTelegramFile:
     ) -> None:
         ghost = tmp_path / "does_not_exist_xyz.bin"
         path_str = str(ghost.resolve())
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
@@ -1013,7 +1014,7 @@ class TestSendTelegramFile:
             text_file_body=path_str,
             text_file_name="out.txt",
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert pending[0].path.read_text(encoding="utf-8") == path_str
         pending[0].path.unlink(missing_ok=True)
@@ -1024,7 +1025,7 @@ class TestSendTelegramFile:
         script = tmp_path / "x.py"
         script.write_text("x", encoding="utf-8")
         body = f"{script.resolve()}\nline2"
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
@@ -1032,7 +1033,7 @@ class TestSendTelegramFile:
             text_file_body=body,
             text_file_name="t.txt",
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert pending[0].path.read_text(encoding="utf-8") == body
         pending[0].path.unlink(missing_ok=True)
@@ -1040,18 +1041,18 @@ class TestSendTelegramFile:
     def test_context_file_success(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         ctx_dir = tmp_path / "ctx"
         ctx_dir.mkdir()
-        monkeypatch.setattr("agent.tools.get_context_dir", lambda: ctx_dir)
         (ctx_dir / "NOTE.md").write_text("ctx body", encoding="utf-8")
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
-            context_filename="NOTE.md",
+            text_file_name="NOTE.md",
+            agent_data_path=str(ctx_dir / "NOTE.md"),
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert len(pending) == 1
         assert pending[0].path.read_text(encoding="utf-8") == "ctx body"
@@ -1060,15 +1061,16 @@ class TestSendTelegramFile:
     def test_agent_data_file_success(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         (tmp_path / "data.csv").write_text("a,b", encoding="utf-8")
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
+            text_file_name="data.csv",
             agent_data_path="data.csv",
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert len(pending) == 1
         pending[0].path.unlink(missing_ok=True)
@@ -1079,7 +1081,9 @@ class TestSendTelegramFile:
         """Absolute agent_data_path may point outside get_data_dir()."""
         data_root = tmp_path / "agent_data"
         data_root.mkdir()
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: data_root)
+        monkeypatch.setattr(
+            "agent.tools.telegram_files.get_data_dir", lambda: data_root
+        )
         outside = tmp_path / "elsewhere" / "pic.png"
         outside.parent.mkdir(parents=True)
         outside.write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -1087,9 +1091,10 @@ class TestSendTelegramFile:
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
+            text_file_name="pic.png",
             agent_data_path=str(outside.resolve()),
         )
-        assert result["status"] == "success"
+        assert result["status"] == "queued"
         pending = end_telegram_file_batch()
         assert len(pending) == 1
         pending[0].path.unlink(missing_ok=True)
@@ -1097,15 +1102,15 @@ class TestSendTelegramFile:
     def test_context_file_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         ctx_dir = tmp_path / "ctx"
         ctx_dir.mkdir()
-        monkeypatch.setattr("agent.tools.get_context_dir", lambda: ctx_dir)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
-            context_filename="MISSING.md",
+            text_file_name="MISSING.md",
+            agent_data_path=str(ctx_dir / "MISSING.md"),
         )
         assert result["status"] == "error"
         end_telegram_file_batch()
@@ -1113,11 +1118,12 @@ class TestSendTelegramFile:
     def test_invalid_agent_data_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
+            text_file_name="passwd",
             agent_data_path="../etc/passwd",
         )
         assert result["status"] == "error"
@@ -1126,7 +1132,7 @@ class TestSendTelegramFile:
     def test_text_filename_invalid(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         result = send_telegram_file(
@@ -1140,7 +1146,7 @@ class TestSendTelegramFile:
     def test_text_body_too_large(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         huge = "x" * (600 * 1024)
@@ -1155,20 +1161,20 @@ class TestSendTelegramFile:
     def test_register_error_unlinks_staged_copy(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         ctx_dir = tmp_path / "ctx"
         ctx_dir.mkdir()
-        monkeypatch.setattr("agent.tools.get_context_dir", lambda: ctx_dir)
         (ctx_dir / "f.md").write_text("z", encoding="utf-8")
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
         with patch(
-            "agent.tools.register_telegram_file_for_send",
+            "agent.tools.telegram_files.register_telegram_file_for_send",
             side_effect=TelegramFileOutboxError("full"),
         ):
             result = send_telegram_file(
                 tool_context,  # type: ignore[arg-type]
-                context_filename="f.md",
+                text_file_name="f.md",
+                agent_data_path=str(ctx_dir / "f.md"),
             )
         assert result["status"] == "error"
         staging = tmp_path / ".telegram_staging"
@@ -1178,7 +1184,7 @@ class TestSendTelegramFile:
     def test_agent_data_file_too_large(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         data_file = tmp_path / "huge.bin"
         data_file.write_bytes(b"x")
         os.truncate(data_file, 101 * 1024 * 1024)
@@ -1187,6 +1193,7 @@ class TestSendTelegramFile:
             tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
             result = send_telegram_file(
                 tool_context,  # type: ignore[arg-type]
+                text_file_name="huge.bin",
                 agent_data_path="huge.bin",
             )
             assert result["status"] == "error"
@@ -1197,16 +1204,17 @@ class TestSendTelegramFile:
     def test_text_file_body_without_name(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         begin_telegram_file_batch()
         tool_context = MockToolContext(state=MockState({"user_id": "u1"}))
+        # text_file_name is required - test with empty string should fail
         result = send_telegram_file(
             tool_context,  # type: ignore[arg-type]
             text_file_body="x",
-            text_file_name=None,
+            text_file_name="",
         )
         assert result["status"] == "error"
-        assert "required" in result["message"].lower()
+        assert "cannot be empty" in result["message"].lower()
         end_telegram_file_batch()
 
 
@@ -1226,7 +1234,7 @@ class TestTelegramPathValidation:
     def test_resolve_host_path_relative_under_data(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("agent.tools.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("agent.tools.telegram_files.get_data_dir", lambda: tmp_path)
         nested = tmp_path / "sub" / "b.txt"
         nested.parent.mkdir(parents=True)
         nested.write_text("x", encoding="utf-8")
@@ -1266,7 +1274,7 @@ class TestTelegramPathValidation:
 
 
 @pytest.mark.asyncio
-@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("agent.tools.claude_coding._agent_runs_inside_docker", return_value=True)
 @patch("asyncio.create_subprocess_exec")
 @patch("os.environ.copy")
 async def test_run_claude_coding_task_success(
@@ -1320,8 +1328,10 @@ async def test_run_claude_coding_task_success(
 
 
 @pytest.mark.asyncio
-@patch("agent.tools._agent_runs_inside_docker", return_value=True)
-@patch("agent.tools._start_background_claude_job", return_value="job-1234")
+@patch("agent.tools.claude_coding._agent_runs_inside_docker", return_value=True)
+@patch(
+    "agent.tools.claude_coding._start_background_claude_job", return_value="job-1234"
+)
 @patch("os.environ.copy")
 async def test_run_claude_coding_task_starts_background_job_for_telegram_user(
     mock_env_copy: MagicMock,
@@ -1360,15 +1370,12 @@ async def test_run_claude_coding_task_starts_background_job_for_telegram_user(
 
 
 @pytest.mark.asyncio
-@patch("agent.tools._agent_runs_inside_docker", return_value=True)
 @patch("os.environ.copy")
 async def test_build_claude_subprocess_env_preserves_process_env(
     mock_env_copy: MagicMock,
-    mock_runs_inside_docker: MagicMock,
     mock_tool_context: MagicMock,
 ) -> None:
     """Claude subprocess env is a copy of the process env (Anthropic from env)."""
-    _ = mock_runs_inside_docker
     _ = mock_tool_context
     mock_env_copy.return_value = {
         "HOME": "/app",
@@ -1376,7 +1383,7 @@ async def test_build_claude_subprocess_env_preserves_process_env(
         "ANTHROPIC_AUTH_TOKEN": "secret-from-env",
     }
 
-    from agent.tools import _build_claude_subprocess_env
+    from agent.tools.claude_coding import _build_claude_subprocess_env
 
     env = _build_claude_subprocess_env()
 
@@ -1386,7 +1393,7 @@ async def test_build_claude_subprocess_env_preserves_process_env(
 
 
 @pytest.mark.asyncio
-@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("agent.tools.claude_coding._agent_runs_inside_docker", return_value=True)
 @patch("os.environ.copy")
 async def test_run_claude_coding_task_missing_anthropic_env(
     mock_env_copy: MagicMock,
@@ -1407,7 +1414,7 @@ async def test_run_claude_coding_task_missing_anthropic_env(
 
 
 @pytest.mark.asyncio
-@patch("agent.tools._agent_runs_inside_docker", return_value=False)
+@patch("agent.tools.claude_coding._agent_runs_inside_docker", return_value=False)
 async def test_run_claude_coding_task_outside_docker(
     mock_runs_inside_docker: MagicMock,
     mock_tool_context: MagicMock,
@@ -1424,7 +1431,7 @@ async def test_run_claude_coding_task_outside_docker(
 
 
 @pytest.mark.asyncio
-@patch("agent.tools._agent_runs_inside_docker", return_value=True)
+@patch("agent.tools.claude_coding._agent_runs_inside_docker", return_value=True)
 @patch("asyncio.create_subprocess_exec")
 @patch("os.environ.copy")
 async def test_run_claude_coding_task_exception(
@@ -1458,13 +1465,13 @@ async def test_send_background_claude_job_result_posts_completion_messages() -> 
     mock_bot = MagicMock()
     mock_bot.send_message = AsyncMock()
     mock_notification_service = MagicMock()
-    mock_notification_service._bot = mock_bot
-    mock_notification_service.bot = mock_bot
+    mock_notification_service.configure_mock(_bot=mock_bot)
+    type(mock_notification_service).bot = property(lambda self: mock_bot)
 
-    from agent.tools import _send_background_claude_job_result
+    from agent.tools.claude_coding import _send_background_claude_job_result
 
     with patch(
-        "agent.telegram.notifications.get_notification_service",
+        "agent.tools.claude_coding.get_notification_service",
         return_value=mock_notification_service,
     ):
         await _send_background_claude_job_result(

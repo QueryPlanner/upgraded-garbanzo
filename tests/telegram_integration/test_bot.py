@@ -10,6 +10,11 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
+from agent.telegram import (
+    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
+    TELEGRAM_SESSION_PROVIDER_KEY,
+    TELEGRAM_USAGE_PROMPT_KEY,
+)
 from agent.telegram.bot import (
     TELEGRAM_DOCUMENT_CAPTION_MAX,
     TELEGRAM_MAX_CONCURRENT_UPDATES,
@@ -28,11 +33,6 @@ from agent.telegram.bot import (
     tokens_command,
 )
 from agent.telegram.handler import TelegramAgentReply
-from agent.telegram_prefs import (
-    TELEGRAM_SESSION_LITELLM_MODEL_KEY,
-    TELEGRAM_SESSION_PROVIDER_KEY,
-    TELEGRAM_USAGE_PROMPT_KEY,
-)
 from agent.utils.telegram_outbox import PendingTelegramFile
 
 

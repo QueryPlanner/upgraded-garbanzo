@@ -350,7 +350,7 @@ class TestModelCallbacks:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Telegram sessions store cumulative usage in session state."""
-        from agent.telegram_prefs import (
+        from agent.telegram import (
             TELEGRAM_USAGE_COMPLETION_KEY,
             TELEGRAM_USAGE_PROMPT_KEY,
             TELEGRAM_USAGE_TOTAL_KEY,
@@ -391,7 +391,7 @@ class TestModelCallbacks:
         mock_llm_request: MockLlmRequest,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from agent.telegram_prefs import TELEGRAM_USAGE_PROMPT_KEY
+        from agent.telegram import TELEGRAM_USAGE_PROMPT_KEY
 
         state = MockState({})
         ctx = MockLoggingCallbackContext(state=state)
@@ -415,7 +415,7 @@ class TestModelCallbacks:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When only some usage fields exist, add_to_key early-returns for None."""
-        from agent.telegram_prefs import (
+        from agent.telegram import (
             TELEGRAM_USAGE_COMPLETION_KEY,
             TELEGRAM_USAGE_PROMPT_KEY,
             TELEGRAM_USAGE_TOTAL_KEY,
@@ -446,7 +446,7 @@ class TestModelCallbacks:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Corrupt session counters must not crash; treat base as 0."""
-        from agent.telegram_prefs import (
+        from agent.telegram import (
             TELEGRAM_USAGE_COMPLETION_KEY,
             TELEGRAM_USAGE_PROMPT_KEY,
             TELEGRAM_USAGE_TOTAL_KEY,
