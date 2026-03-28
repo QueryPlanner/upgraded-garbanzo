@@ -399,6 +399,32 @@ class TestHandleMessage:
         assert second_call.kwargs["parse_mode"] == ParseMode.HTML
 
     @pytest.mark.asyncio
+    async def test_skips_streamed_empty_chunk(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
+        """Empty or whitespace-only streamed chunks should be skipped."""
+
+        async def mock_process_message(**kwargs: object) -> TelegramAgentReply:
+            on_text_chunk = kwargs["on_text_chunk"]
+            assert callable(on_text_chunk)
+            # Send whitespace-only chunk that should be skipped
+            await on_text_chunk("   ")
+            # Send actual content
+            await on_text_chunk("Real content.")
+            return TelegramAgentReply(text="Real content.", streamed_text=True)
+
+        with patch(
+            "agent.telegram.bot.process_message",
+            side_effect=mock_process_message,
+        ):
+            await handle_message(mock_update, mock_context)
+
+        # Only one call for the real content, whitespace chunk was skipped
+        mock_update.message.reply_text.assert_called_once_with(
+            "Real content.", parse_mode=ParseMode.HTML
+        )
+
+    @pytest.mark.asyncio
     async def test_retries_without_markdown_when_telegram_rejects_chunk(
         self, mock_update: MagicMock, mock_context: MagicMock
     ) -> None:

@@ -1339,7 +1339,7 @@ async def test_run_claude_coding_task_starts_background_job_for_telegram_user(
     from agent.tools import run_claude_coding_task
 
     result = await run_claude_coding_task(
-        tool_context=tool_context,
+        tool_context=tool_context,  # type: ignore[arg-type]
         prompt="Fix the bug",
         workdir="/app/workspace",
     )

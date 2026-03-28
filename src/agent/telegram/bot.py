@@ -404,6 +404,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             """Forward visible model text to Telegram as it arrives."""
             if not chunk_text.strip():
                 return
+            assert update.message is not None  # noqa: S101
             await _send_agent_text(update.message, chunk_text)
 
         # Process message through ADK agent

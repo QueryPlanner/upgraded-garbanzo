@@ -169,6 +169,37 @@ class TestTelegramHandler:
             mock_get.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_process_message_calls_on_text_chunk_callback(
+        self, mock_agent: MagicMock
+    ) -> None:
+        """Test that on_text_chunk callback is called during streaming."""
+        handler = TelegramHandler(mock_agent, app_name="test-app")
+
+        chunks_received: list[str] = []
+
+        async def on_text_chunk(text: str) -> None:
+            chunks_received.append(text)
+
+        async def mock_run_async(**kwargs: object) -> object:
+            # Yield two events with text parts
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text="Hello")])
+            )
+            yield MagicMock(
+                content=types.Content(role="model", parts=[types.Part(text=" World")])
+            )
+
+        with patch.object(handler.runner, "run_async", mock_run_async):
+            response = await handler.process_message(
+                "user-1", "Hi", on_text_chunk=on_text_chunk
+            )
+
+        assert response.text == "Hello World"
+        assert response.streamed_text is True
+        # Should have received two chunks
+        assert chunks_received == ["Hello", " World"]
+
+    @pytest.mark.asyncio
     async def test_process_message_recreates_session_missing_user_id(
         self, mock_agent: MagicMock
     ) -> None:
