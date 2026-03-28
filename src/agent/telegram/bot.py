@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Iterator
 
 from dotenv import load_dotenv
 from openinference.instrumentation.google_adk import GoogleADKInstrumentor
@@ -83,6 +84,61 @@ MAX_MESSAGE_LENGTH = 4096  # Telegram's message limit
 TELEGRAM_DOCUMENT_CAPTION_MAX = 1024
 TELEGRAM_MAX_CONCURRENT_UPDATES = 32
 _TELEGRAM_OBSERVABILITY_INITIALIZED = False
+
+
+def _iter_coarse_split_chunks(remaining: str, max_length: int) -> Iterator[str]:
+    """Yield segments of ``remaining`` at newlines, spaces, or hard boundaries.
+
+    Used when a blob still exceeds ``max_length`` after paragraph merging.
+    """
+    while remaining:
+        if len(remaining) <= max_length:
+            trailing = remaining.strip()
+            if trailing:
+                yield trailing
+            break
+
+        split_point = max_length
+        newline_pos = remaining.rfind("\n", 0, max_length)
+        if newline_pos > max_length // 2:
+            split_point = newline_pos + 1
+        else:
+            space_pos = remaining.rfind(" ", 0, max_length)
+            if space_pos > max_length // 2:
+                split_point = space_pos + 1
+
+        piece = remaining[:split_point].strip()
+        if piece:
+            yield piece
+        remaining = remaining[split_point:]
+
+
+def _iter_telegram_sized_chunks(text: str, max_length: int) -> Iterator[str]:
+    """Yield Telegram-sized chunks: merge ``\\n\\n`` paragraphs, then coarse split."""
+    paragraphs = text.split("\n\n")
+    current_chunk = ""
+
+    for paragraph in paragraphs:
+        if current_chunk and len(current_chunk) + 2 + len(paragraph) > max_length:
+            merged = current_chunk.strip()
+            if merged:
+                yield merged
+            current_chunk = paragraph
+        elif current_chunk:
+            current_chunk += "\n\n" + paragraph
+        else:
+            current_chunk = paragraph
+
+    if not current_chunk:
+        return
+
+    if len(current_chunk) <= max_length:
+        tail = current_chunk.strip()
+        if tail:
+            yield tail
+        return
+
+    yield from _iter_coarse_split_chunks(current_chunk, max_length)
 
 
 def _initialize_observability() -> None:
@@ -493,31 +549,8 @@ async def _send_long_message(message: Message, text: str) -> None:
         message: The Telegram message object to reply to.
         text: The text to send (already converted to Telegram HTML).
     """
-    # Try to split at paragraph breaks first (double newlines)
-    paragraphs = text.split("\n\n")
-    current_chunk = ""
-
-    for paragraph in paragraphs:
-        # Check if adding this paragraph would exceed the limit
-        if (
-            current_chunk
-            and len(current_chunk) + 2 + len(paragraph) > MAX_MESSAGE_LENGTH
-        ):
-            # Send current chunk (validated)
-            await _send_validated_chunk(message, current_chunk.strip())
-            current_chunk = paragraph
-        elif current_chunk:
-            current_chunk += "\n\n" + paragraph
-        else:
-            current_chunk = paragraph
-
-    # Send remaining content
-    if current_chunk:
-        if len(current_chunk) <= MAX_MESSAGE_LENGTH:
-            await _send_validated_chunk(message, current_chunk.strip())
-        else:
-            # Fallback: split at single newlines or character boundaries
-            await _split_and_send(message, current_chunk)
+    for chunk in _iter_telegram_sized_chunks(text, MAX_MESSAGE_LENGTH):
+        await _send_validated_chunk(message, chunk)
 
 
 def _render_html_as_plain_text(text: str) -> str:
@@ -717,36 +750,73 @@ async def _send_validated_chunk(
 
 
 async def _split_and_send(message: Message, text: str) -> None:
-    """Fallback splitter for text that can't be split at paragraph boundaries.
+    """Coarse splitter for one blob (newlines / spaces); used directly in tests."""
+    for chunk in _iter_coarse_split_chunks(text, MAX_MESSAGE_LENGTH):
+        await _send_validated_chunk(message, chunk)
 
-    Args:
-        message: The Telegram message object to reply to.
-        text: Text to send (may exceed limit, already in Telegram format).
-    """
-    remaining = text
 
-    while remaining:  # pragma: no branch
-        if len(remaining) <= MAX_MESSAGE_LENGTH:
-            await _send_validated_chunk(message, remaining.strip())
-            break
+async def _send_validated_html_to_chat(
+    bot: Bot,
+    chat_id: int | str,
+    chunk: str,
+    fallback_text: str | None = None,
+) -> None:
+    """Send one HTML chunk to a chat with plain-text fallback (no reply-to)."""
+    if fallback_text is not None:
+        plain_text = fallback_text
+    else:
+        plain_text = _render_html_as_plain_text(chunk)
 
-        # Try to find a good split point
-        split_point = MAX_MESSAGE_LENGTH
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=chunk,
+            parse_mode=ParseMode.HTML,
+        )
+    except TelegramError:
+        logger.warning(
+            "Telegram rejected HTML chunk for chat_id=%s, sending plain",
+            chat_id,
+            exc_info=True,
+        )
+        await bot.send_message(chat_id=chat_id, text=plain_text)
 
-        # Look for newline near the limit
-        newline_pos = remaining.rfind("\n", 0, MAX_MESSAGE_LENGTH)
-        if newline_pos > MAX_MESSAGE_LENGTH // 2:
-            split_point = newline_pos + 1
-        else:
-            # Look for space near the limit
-            space_pos = remaining.rfind(" ", 0, MAX_MESSAGE_LENGTH)
-            if space_pos > MAX_MESSAGE_LENGTH // 2:
-                split_point = space_pos + 1
 
-        chunk = remaining[:split_point].strip()
-        if chunk:
-            await _send_validated_chunk(message, chunk)
-        remaining = remaining[split_point:]
+async def _send_long_agent_html_to_chat(
+    bot: Bot,
+    chat_id: int | str,
+    html_text: str,
+) -> None:
+    """Split long HTML across Telegram messages (paragraph boundaries first)."""
+    for chunk in _iter_telegram_sized_chunks(html_text, MAX_MESSAGE_LENGTH):
+        await _send_validated_html_to_chat(
+            bot,
+            chat_id,
+            chunk,
+            fallback_text=None,
+        )
+
+
+async def send_agent_markdown_to_chat_id(
+    bot: Bot,
+    chat_id: int | str,
+    response_text: str,
+) -> None:
+    """Send agent markdown to a chat as Telegram HTML (e.g. Claude job follow-up)."""
+    if not response_text.strip():
+        return
+
+    telegram_response = _render_markdown_as_html(response_text)
+    if len(telegram_response) <= MAX_MESSAGE_LENGTH:
+        await _send_validated_html_to_chat(
+            bot,
+            chat_id,
+            telegram_response.strip(),
+            fallback_text=response_text,
+        )
+        return
+
+    await _send_long_agent_html_to_chat(bot, chat_id, telegram_response)
 
 
 def create_application(token: str) -> Application:

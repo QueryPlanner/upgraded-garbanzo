@@ -120,6 +120,28 @@ Rules:
 - Stay on-topic and do not add unrelated tasks, logging, recipes, tips, or
   “let me know if you need anything else”."""
 
+# Injected as a user turn when a background Claude Code job finishes (Telegram).
+CLAUDE_JOB_COMPLETION_TEMPLATE = """[CLAUDE CODING JOB COMPLETE]
+
+Job id: {job_id}
+Workdir: {cwd}
+Status: {status}
+Exit code: {exit_code}
+{truncated_line}
+
+--- stdout ---
+{stdout_section}
+
+--- stderr ---
+{stderr_section}
+
+The background Claude Code run you started has finished. The raw subprocess output
+was also posted to this chat in separate messages.
+
+Summarize what happened for the user, call out errors or follow-ups, and propose
+concrete next steps (e.g. re-run the coding tool, verify CI, or ask one focused
+question). You may use tools if needed to verify or continue the task."""
+
 
 class TelegramHandler:
     """Handler for processing Telegram messages through an ADK agent.
@@ -637,6 +659,60 @@ class TelegramHandler:
 
         return response
 
+    async def process_claude_job_completion(
+        self,
+        user_id: str,
+        *,
+        job_id: str,
+        cwd: str,
+        result: dict[str, Any],
+    ) -> TelegramAgentReply:
+        """Run one agent turn with the finished Claude job output in-session.
+
+        Uses the same ``session_id`` as normal Telegram chat (``user_id``) so the
+        model sees this as the next user message after the tool started the job.
+
+        Note:
+            Like :meth:`process_message`, this cancels any in-flight Telegram turn
+            if one is active when this runs (newest-wins coordination).
+        """
+        status = str(result.get("status") or "unknown")
+        exit_raw = result.get("exit_code")
+        exit_code = "n/a" if exit_raw is None else str(exit_raw)
+        truncated = bool(result.get("truncated"))
+        truncated_line = (
+            "Note: subprocess output was truncated at the capture limit."
+            if truncated
+            else ""
+        )
+        stdout_section = str(result.get("stdout") or "").strip() or "(none)"
+        stderr_section = str(result.get("stderr") or "").strip() or "(none)"
+        error_message = str(result.get("message") or "").strip()
+        if error_message and stdout_section == "(none)" and stderr_section == "(none)":
+            stdout_section = f"(tool error) {error_message}"
+
+        message = CLAUDE_JOB_COMPLETION_TEMPLATE.format(
+            job_id=job_id,
+            cwd=cwd,
+            status=status,
+            exit_code=exit_code,
+            truncated_line=truncated_line,
+            stdout_section=stdout_section,
+            stderr_section=stderr_section,
+        )
+        logger.info(
+            "Processing Claude job completion for user %s job_id=%s status=%s",
+            user_id,
+            job_id,
+            status,
+        )
+        return await self.process_message(
+            user_id=user_id,
+            message=message,
+            session_id=user_id,
+            on_text_chunk=None,
+        )
+
     def _build_reminder_session_id(self, user_id: str) -> str:
         """Return the dedicated session used for reminder delivery."""
         return f"{user_id}{REMINDER_SESSION_SUFFIX}"
@@ -716,6 +792,24 @@ async def process_message(
         session_id=session_id,
         force_litellm_model=force_litellm_model,
         on_text_chunk=on_text_chunk,
+    )
+
+
+async def process_claude_job_completion(
+    user_id: str,
+    *,
+    job_id: str,
+    cwd: str,
+    result: dict[str, Any],
+) -> TelegramAgentReply | None:
+    """Inject a Claude job result into the user's session and run one agent turn."""
+    if _handler is None:
+        return None
+    return await _handler.process_claude_job_completion(
+        user_id=user_id,
+        job_id=job_id,
+        cwd=cwd,
+        result=result,
     )
 
 

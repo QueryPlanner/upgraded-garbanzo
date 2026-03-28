@@ -19,9 +19,11 @@ from agent.telegram.bot import (
     TELEGRAM_DOCUMENT_CAPTION_MAX,
     TELEGRAM_MAX_CONCURRENT_UPDATES,
     _render_markdown_as_html,
+    _send_long_agent_html_to_chat,
     _send_long_message,
     _send_queued_telegram_documents,
     _send_validated_chunk,
+    _send_validated_html_to_chat,
     _split_and_send,
     _telegram_html_tag_stack_valid,
     create_application,
@@ -29,6 +31,7 @@ from agent.telegram.bot import (
     help_command,
     model_command,
     reset_command,
+    send_agent_markdown_to_chat_id,
     start_command,
     tokens_command,
 )
@@ -582,8 +585,8 @@ class TestSendLongMessage:
         assert "\n\n" in call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_split_and_send(self) -> None:
-        """Test that _split_and_send is called for very long paragraphs."""
+    async def test_falls_back_to_coarse_split_for_long_paragraph(self) -> None:
+        """Very long single paragraphs use newline/space/coarse splitting."""
         mock_message = MagicMock()
         mock_message.reply_text = AsyncMock()
 
@@ -592,7 +595,6 @@ class TestSendLongMessage:
 
         await _send_long_message(mock_message, long_paragraph)
 
-        # Should split via _split_and_send
         assert mock_message.reply_text.call_count >= 2
 
     @pytest.mark.asyncio
@@ -1118,6 +1120,94 @@ class TestSlashModelCommands:
         call = mock_update.message.reply_text.call_args
         text = call.args[0] if call.args else call.kwargs.get("text", "")
         assert "42" in text
+
+
+class TestSendAgentMarkdownToChatId:
+    """Coverage for Claude job follow-up Telegram sends (no reply-to Message)."""
+
+    @pytest.mark.asyncio
+    async def test_skips_whitespace_only(self) -> None:
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        await send_agent_markdown_to_chat_id(bot, 1, "   \n")
+        bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sends_short_markdown_as_html(self) -> None:
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        await send_agent_markdown_to_chat_id(bot, 42, "Hello **world**")
+        bot.send_message.assert_awaited_once()
+        call_kw = bot.send_message.await_args.kwargs
+        assert call_kw["chat_id"] == 42
+        assert call_kw["parse_mode"] == ParseMode.HTML
+
+    @pytest.mark.asyncio
+    async def test_html_rejection_falls_back_to_plain(self) -> None:
+        bot = MagicMock()
+        bot.send_message = AsyncMock(
+            side_effect=[TelegramError("bad html"), None],
+        )
+        await _send_validated_html_to_chat(
+            bot,
+            7,
+            "<b>x</b>",
+            fallback_text="plain body",
+        )
+        assert bot.send_message.await_count == 2
+        second_kw = bot.send_message.await_args_list[1].kwargs
+        assert second_kw["text"] == "plain body"
+        assert "parse_mode" not in second_kw
+
+    @pytest.mark.asyncio
+    async def test_validated_html_without_fallback_renders_plain_from_html(
+        self,
+    ) -> None:
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        await _send_validated_html_to_chat(bot, 3, "<b>z</b>", fallback_text=None)
+        bot.send_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_long_markdown_splits_messages(self) -> None:
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        body = "word " * 200
+        with patch("agent.telegram.bot.MAX_MESSAGE_LENGTH", 80):
+            await send_agent_markdown_to_chat_id(bot, 9, f"Hi\n\n{body}")
+        assert bot.send_message.await_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_long_html_merges_paragraphs_then_single_send(self) -> None:
+        """Exercise ``elif current_chunk`` merge and final chunk <= MAX branch."""
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        html_text = "p1" * 5 + "\n\n" + "p2" * 5
+        with patch("agent.telegram.bot.MAX_MESSAGE_LENGTH", 200):
+            await _send_long_agent_html_to_chat(bot, 1, html_text)
+        bot.send_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_long_html_splits_on_space_when_no_newline(self) -> None:
+        """Exercise space-based split in the character fallback loop."""
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        chunk_a = "a" * 55
+        chunk_b = "b" * 120
+        html_text = chunk_a + " " + chunk_b
+        with patch("agent.telegram.bot.MAX_MESSAGE_LENGTH", 100):
+            await _send_long_agent_html_to_chat(bot, 2, html_text)
+        assert bot.send_message.await_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_long_html_splits_on_newline_in_fallback_loop(self) -> None:
+        """Exercise newline-based split when newline falls after MAX // 2."""
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        html_text = "a" * 60 + "\n" + "b" * 150
+        with patch("agent.telegram.bot.MAX_MESSAGE_LENGTH", 100):
+            await _send_long_agent_html_to_chat(bot, 3, html_text)
+        assert bot.send_message.await_count >= 2
 
 
 class TestMain:

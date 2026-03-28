@@ -20,6 +20,7 @@ from agent.telegram.handler import (
     _telegram_litellm_model_context,
     get_handler,
     initialize_runner,
+    process_claude_job_completion,
     process_message,
     reset_session,
 )
@@ -1022,3 +1023,22 @@ class TestReminderPromptTemplate:
         assert "Test reminder" in result
         assert "2026-03-19 12:00 UTC" in result
         assert "[SCHEDULED REMINDER]" in result
+
+
+@pytest.mark.asyncio
+async def test_process_claude_job_completion_without_handler() -> None:
+    """Module wrapper returns None when initialize_runner was never called."""
+    import agent.telegram.handler as handler_module
+
+    saved = handler_module._handler
+    handler_module._handler = None
+    try:
+        result = await process_claude_job_completion(
+            "user-1",
+            job_id="job1",
+            cwd="/w",
+            result={"status": "success"},
+        )
+        assert result is None
+    finally:
+        handler_module._handler = saved
