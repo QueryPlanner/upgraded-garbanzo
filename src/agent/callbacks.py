@@ -6,6 +6,7 @@ memory persistence, and Telegram notifications for tool usage.
 """
 
 import logging
+import os
 from collections import defaultdict
 from time import perf_counter
 from typing import Any
@@ -15,6 +16,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import ToolContext
 from google.adk.tools.base_tool import BaseTool
+from google.genai import types
 
 from .telegram.prefs import (
     TELEGRAM_USAGE_COMPLETION_KEY,
@@ -421,5 +423,94 @@ async def notify_tool_call(
         )
     except Exception:
         logger.exception("Failed to send tool notification")
+
+    return None
+
+
+async def add_memories_to_context(
+    callback_context: CallbackContext,
+    llm_request: LlmRequest,
+) -> None:
+    """Inject relevant memories from mem0 into the LLM context.
+
+    This callback retrieves memories relevant to the user's current message
+    and injects them into the prompt context, allowing the agent to have
+    awareness of past interactions and user preferences.
+
+    Args:
+        callback_context: The callback context with access to invocation context.
+        llm_request: The LLM request to potentially modify with memory context.
+    """
+    from .mem0 import get_mem0_manager, is_mem0_enabled
+
+    if not is_mem0_enabled():
+        logger.debug("mem0 not enabled, skipping memory injection")
+        return None
+
+    # Extract the user's message from the request
+    user_message = ""
+    for content in reversed(llm_request.contents):
+        if content.role == "user" and content.parts:
+            for part in content.parts:
+                if part.text:
+                    user_message = part.text
+                    break
+        if user_message:
+            break
+
+    if not user_message:
+        logger.debug("No user message found, skipping memory injection")
+        return None
+
+    try:
+        manager = get_mem0_manager()
+
+        # Get user_id from state if available
+        user_id = None
+        if callback_context.state:
+            user_id = callback_context.state.get("user_id")
+
+        # Search for relevant memories
+        result = manager.search_memory(
+            query=user_message,
+            user_id=user_id,
+            limit=int(os.getenv("MEM0_SEARCH_LIMIT", "5")),
+        )
+
+        memories = result.get("memories", [])
+        if not memories:
+            logger.debug("No relevant memories found")
+            return None
+
+        # Format memories for injection - only include valid memory fields
+        memory_text = "\n".join(
+            f"- {m['memory']}" for m in memories if m and m.get("memory")
+        )
+
+        # Skip injection if no valid memory text
+        if not memory_text or not memory_text.strip():
+            logger.debug("No valid memory text to inject")
+            return None
+
+        # Create a system instruction with memories
+        memory_content = types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    text=(
+                        "[Context from memory - use this to personalize your "
+                        f"response]\n{memory_text}"
+                    )
+                )
+            ],
+        )
+
+        # Insert memory context at the beginning of the conversation
+        llm_request.contents.insert(0, memory_content)
+
+        logger.info(f"Injected {len(memories)} memories into context for user message")
+
+    except Exception as e:
+        logger.warning(f"Failed to inject memories into context: {e}")
 
     return None

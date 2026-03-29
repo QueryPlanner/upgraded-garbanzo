@@ -36,6 +36,9 @@ dependencies = [
     "youtube-transcript-api>=1.0.0,<2.0.0",
     "aiosqlite>=0.22.1",
     "playwright>=1.50.0,<2.0.0",
+    # Mem0 memory integration
+    "mem0ai>=1.0.0",
+    "fastembed>=0.4.0",
 ]
 
 [project.scripts]

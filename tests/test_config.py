@@ -507,3 +507,21 @@ class TestGetContextDir:
         resolved = get_context_dir()
 
         assert resolved == custom.resolve()
+
+    def test_fallback_to_config_file_location(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When neither AGENT_CONTEXT_DIR nor AGENT_DIR is set, use config file."""
+        monkeypatch.delenv("AGENT_CONTEXT_DIR", raising=False)
+        monkeypatch.delenv("AGENT_DIR", raising=False)
+
+        resolved = get_context_dir()
+
+        # Should resolve to repo_root/.context based on config.py location
+        # config.py is at src/agent/utils/config.py, so 4 parents up = repo root
+        import agent.utils.config as config_module
+
+        config_path = Path(config_module.__file__).resolve()
+        expected = config_path.parent.parent.parent.parent / ".context"
+        assert resolved == expected
+        assert resolved.is_dir()
