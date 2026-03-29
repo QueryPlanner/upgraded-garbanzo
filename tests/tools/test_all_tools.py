@@ -851,6 +851,22 @@ class TestDockerBashExecute:
         assert "out" in result["stdout"]
         assert "err" in result["stderr"]
 
+    @pytest.mark.asyncio
+    async def test_uses_cwd_when_app_not_directory(self) -> None:
+        """Test that workdir falls back to cwd when /app is not a directory."""
+        state = MockState({})
+        tool_context = MockToolContext(state=state)
+        with (
+            patch("agent.tools.docker._agent_runs_inside_docker", return_value=True),
+            patch("pathlib.Path.is_dir", return_value=False),
+        ):
+            result = await docker_bash_execute(
+                tool_context,  # type: ignore[arg-type]
+                "pwd",
+            )
+        assert result["status"] == "success"
+        assert result["exit_code"] == 0
+
 
 class TestSendTelegramFile:
     """Tests for send_telegram_file tool."""

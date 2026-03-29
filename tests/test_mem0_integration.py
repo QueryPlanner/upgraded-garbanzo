@@ -1606,3 +1606,38 @@ class TestAddMemoriesToContext:
             # Should find the valid text from the first user message
             call_kwargs = mock_manager.search_memory.call_args[1]
             assert call_kwargs["query"] == "Valid text"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_memories_have_no_valid_memory_field(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test callback skips when memories exist but have no valid 'memory' field."""
+        caplog.set_level(logging.DEBUG)
+
+        request = MockLlmRequestWithContents(
+            contents=[
+                MockContentWithRole(role="user", parts=[MockPart("Hello")]),
+            ]
+        )
+
+        mock_manager = MagicMock()
+        # Return memories where NONE pass the filter `m and m.get("memory")`
+        # This will result in an empty memory_text string
+        mock_manager.search_memory.return_value = {
+            "memories": [
+                {"id": "mem-1"},  # No 'memory' field - fails m.get("memory")
+                None,  # None memory - fails `m and ...`
+                {},  # Empty dict - fails m.get("memory")
+            ]
+        }
+
+        with (
+            patch("agent.mem0.is_mem0_enabled", return_value=True),
+            patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
+        ):
+            context = MockMemoriesCallbackContext()
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
+
+            # Should not inject anything - memory_text would be empty string
+            assert len(request.contents) == 1  # Only original content
+            assert "No valid memory text to inject" in caplog.text

@@ -28,6 +28,9 @@ from .callbacks import (  # noqa: E402
 from .litellm_config import build_litellm_kwargs  # noqa: E402
 from .litellm_session_router import TelegramLitellmRouter  # noqa: E402
 from .mcp import create_mcp_toolsets  # noqa: E402
+
+# Mem0 memory integration (optional)
+from .mem0 import is_mem0_enabled, save_memory, search_memory  # noqa: E402
 from .prompt import (  # noqa: E402
     return_description_root,
     return_global_instruction,
@@ -35,9 +38,6 @@ from .prompt import (  # noqa: E402
 )
 from .skills.loader import create_skill_toolset  # noqa: E402
 from .telegram import TelegramLitellmRequestModelPlugin  # noqa: E402
-
-# Mem0 memory integration (optional)
-from .mem0 import is_mem0_enabled, save_memory, search_memory  # noqa: E402
 
 __all__ = ["root_agent", "app"]
 from .tools import (  # noqa: E402
