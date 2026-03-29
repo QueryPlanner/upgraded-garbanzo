@@ -12,11 +12,11 @@ from time import perf_counter
 from typing import Any
 
 from google.adk.agents.callback_context import CallbackContext
-from google.genai import types
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import ToolContext
 from google.adk.tools.base_tool import BaseTool
+from google.genai import types
 
 from .telegram.prefs import (
     TELEGRAM_USAGE_COMPLETION_KEY,
@@ -482,8 +482,15 @@ async def add_memories_to_context(
             logger.debug("No relevant memories found")
             return None
 
-        # Format memories for injection
-        memory_text = "\n".join(f"- {m.get('memory', str(m))}" for m in memories if m)
+        # Format memories for injection - only include valid memory fields
+        memory_text = "\n".join(
+            f"- {m['memory']}" for m in memories if m and m.get("memory")
+        )
+
+        # Skip injection if no valid memory text
+        if not memory_text or not memory_text.strip():
+            logger.debug("No valid memory text to inject")
+            return None
 
         # Create a system instruction with memories
         memory_content = types.Content(

@@ -243,11 +243,8 @@ def get_mem0_client() -> Any:
     # Server mode: connects to external Qdrant at qdrant_host:qdrant_port
     qdrant_path = os.getenv("MEM0_QDRANT_PATH", _DEFAULT_QDRANT_PATH)
     qdrant_host = os.getenv("MEM0_QDRANT_HOST", None)
-    qdrant_port = (
-        int(os.getenv("MEM0_QDRANT_PORT", "0"))
-        if os.getenv("MEM0_QDRANT_PORT")
-        else None
-    )
+    qdrant_port_str = os.getenv("MEM0_QDRANT_PORT")
+    qdrant_port = int(qdrant_port_str) if qdrant_port_str else None
 
     if qdrant_host and qdrant_port:
         logger.debug(
