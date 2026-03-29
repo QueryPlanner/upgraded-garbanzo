@@ -22,6 +22,7 @@ A **personal AI assistant** built on Google ADK with Telegram integration. Deplo
 - 🔭 **Open Observability**: Built-in OpenTelemetry instrumentation with Langfuse support.
 - 🚀 **Modern Stack**: Python 3.13, `uv`, `fastapi`, `asyncpg`.
 - 💾 **Production Persistence**: Postgres-backed sessions with SQLite for reminders and fitness data.
+- 🧠 **Persistent Memory**: Optional mem0 integration for context-aware conversations across sessions.
 
 ## Quickstart
 
@@ -177,6 +178,53 @@ docker compose -f docker-compose.prod.yml down
 The template comes pre-wired with **OpenTelemetry**. By default, it's set up to export traces to **Langfuse** for beautiful, actionable insights into your agent's performance and costs.
 
 To change the backend, simply update the OTel exporter configuration in your `.env`. You are not locked into any specific observability vendor.
+
+## Persistent Memory (mem0)
+
+Garbanzo supports persistent conversation memory via [mem0](https://mem0.ai/), enabling the agent to remember important information across sessions.
+
+### Features
+
+- **Save Memory**: Store important facts about users, preferences, or conversations
+- **Search Memory**: Retrieve relevant memories based on context
+- **Automatic Injection**: Relevant memories are automatically injected into LLM context
+- **Per-User Isolation**: Memories are stored per user ID
+
+### Setup
+
+1. **Add to your `.env`**:
+   ```bash
+   # Use OPENROUTER_API_KEY as fallback, or set specific key:
+   MEM0_LLM_API_KEY=your-api-key
+
+   # Optional: customize model (defaults to openrouter/google/gemini-2.0-flash-001)
+   MEM0_LLM_MODEL=openrouter/google/gemini-2.0-flash-001
+   ```
+
+2. **Memory Storage**: By default, memories are stored locally in `./data/qdrant` using embedded Qdrant. No additional services needed.
+
+3. **Start the agent**: Memory tools are automatically enabled when `MEM0_LLM_API_KEY` or `OPENROUTER_API_KEY` is set.
+
+### Configuration Options
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `MEM0_LLM_API_KEY` | (uses `OPENROUTER_API_KEY`) | API key for mem0's LLM operations |
+| `MEM0_LLM_MODEL` | `openrouter/google/gemini-2.0-flash-001` | Model for memory extraction |
+| `MEM0_EMBEDDER_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model (no API key needed) |
+| `MEM0_USER_ID` | `default` | Default user ID for memory operations |
+| `MEM0_COLLECTION_NAME` | `agent_memories` | Vector store collection name |
+| `MEM0_SEARCH_LIMIT` | `5` | Number of memories to inject into context |
+| `MEM0_QDRANT_PATH` | `./data/qdrant` | Path for local Qdrant storage |
+
+### Remote Qdrant (Optional)
+
+For production deployments, connect to a remote Qdrant server:
+
+```bash
+MEM0_QDRANT_HOST=localhost
+MEM0_QDRANT_PORT=6333
+```
 
 ## Telegram Bot Integration
 
