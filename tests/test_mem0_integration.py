@@ -727,9 +727,7 @@ class TestSearchMemoryTool:
             patch("agent.mem0.manager.get_mem0_client", return_value=mock_mem0_client),
             patch("agent.mem0.manager.is_mem0_enabled", return_value=True),
         ):
-            result = search_memory(
-                cast(Any, mock_tool_context), "test query", limit=5
-            )
+            result = search_memory(cast(Any, mock_tool_context), "test query", limit=5)
 
             assert result["status"] == "success"
             assert len(result["memories"]) == 2
@@ -1155,9 +1153,7 @@ class TestAddMemoriesToContext:
             context = MockMemoriesCallbackContext()
             request = MockLlmRequestWithContents()
 
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             assert "mem0 not enabled, skipping memory injection" in caplog.text
 
@@ -1178,9 +1174,7 @@ class TestAddMemoriesToContext:
 
         with patch("agent.mem0.is_mem0_enabled", return_value=True):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             assert "No user message found, skipping memory injection" in caplog.text
 
@@ -1218,9 +1212,7 @@ class TestAddMemoriesToContext:
             context = MockMemoriesCallbackContext(
                 state=MockState({"user_id": "test_user"})
             )
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             assert len(request.contents) == 2  # Original + injected memory
             # Check the injected content is at the beginning
@@ -1256,9 +1248,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             assert len(request.contents) == 1  # Only original content
             assert "No relevant memories found" in caplog.text
@@ -1286,9 +1276,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             assert "Failed to inject memories into context" in caplog.text
 
@@ -1314,9 +1302,7 @@ class TestAddMemoriesToContext:
             patch.dict("os.environ", {"MEM0_SEARCH_LIMIT": "10"}),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Verify search_memory was called with limit=10
             mock_manager.search_memory.assert_called_once()
@@ -1346,9 +1332,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should use the second user message (reversed iteration picks first text)
             mock_manager.search_memory.assert_called_once()
@@ -1379,9 +1363,7 @@ class TestAddMemoriesToContext:
             context = MockMemoriesCallbackContext(
                 state=MockState({"user_id": "user_abc"})
             )
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Verify user_id was passed
             call_kwargs = mock_manager.search_memory.call_args[1]
@@ -1413,9 +1395,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should find the valid text message
             call_kwargs = mock_manager.search_memory.call_args[1]
@@ -1448,9 +1428,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Check memory formatting
             injected = request.contents[0]
@@ -1481,9 +1459,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should find the valid message
             call_kwargs = mock_manager.search_memory.call_args[1]
@@ -1515,9 +1491,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should find the valid message
             call_kwargs = mock_manager.search_memory.call_args[1]
@@ -1550,9 +1524,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should skip empty string and find the valid text message
             call_kwargs = mock_manager.search_memory.call_args[1]
@@ -1592,9 +1564,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should find the text from the second user message
             call_kwargs = mock_manager.search_memory.call_args[1]
@@ -1631,9 +1601,7 @@ class TestAddMemoriesToContext:
             patch("agent.mem0.get_mem0_manager", return_value=mock_manager),
         ):
             context = MockMemoriesCallbackContext()
-            await add_memories_to_context(
-                cast(Any, context), cast(Any, request)
-            )
+            await add_memories_to_context(cast(Any, context), cast(Any, request))
 
             # Should find the valid text from the first user message
             call_kwargs = mock_manager.search_memory.call_args[1]
